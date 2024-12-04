@@ -766,18 +766,29 @@ class Member:
                 xWP = intrp(0, rA[2], rB[2], rA[0], rB[0])                     # x coordinate where member axis cross the waterplane [m]
                 yWP = intrp(0, rA[2], rB[2], rA[1], rB[1])                     # y coordinate where member axis cross the waterplane [m]
                 if self.shape=='circular':
-                    dWP = intrp(0, rA[2], rB[2], self.d[i], self.d[i-1])       # diameter of member where its axis crosses the waterplane [m]
-                    AWP = (np.pi/4)*dWP**2                                     # waterplane area of member [m^2]
-                    IWP = (np.pi/64)*dWP**4                                    # waterplane moment of inertia [m^4] approximates as a circle
-                    IxWP = IWP                                                 # MoI of circular waterplane is the same all around
-                    IyWP = IWP                                                 # MoI of circular waterplane is the same all around
+                    dWP = intrp(0, rA[2], rB[2], self.d[i-1], self.d[i])       # diameter of member where its axis crosses the waterplane [m]
+                    AWP = np.pi*(dWP/2)**2/cosPhi                              # waterplane area of member [m^2] 
+                                                                               # note that clipped waterplane area should be an ellipse generally @Yang
+                    
+                    IxWP = np.pi/64*dWP**4/cosPhi                              # waterplane moment of inertia [m^4] approximates as an ellipse (short side)
+                    IyWP = IxWP/(cosPhi**2)                                    # waterplane moment of inertia [m^4] approximates as an ellipse (Long  side)
+                    
+                    I = np.diag([IxWP, IyWP])
+                    T = np.array([[cosBeta, sinBeta], [-sinBeta, cosBeta]])    # 2D rotation matrix: R_z(-Beta)
+                    
+                    I_rot = np.matmul(T.T, np.matmul(I, T))                    # area moment of inertia tensor
+                    IxWP = I_rot[0,0]                                          # the transformation matrix to unrotate the member's local axes                     
+                    IyWP = I_rot[1,1]                                          # area moment of inertia tensor where MoI axes are now in the same direction as PRP                     
                 elif self.shape=='rectangular':
-                    slWP = intrp(0, rA[2], rB[2], self.sl[i], self.sl[i-1])    # side lengths of member where its axis crosses the waterplane [m]
-                    AWP = slWP[0]*slWP[1]                                      # waterplane area of rectangular member [m^2]
-                    IxWP = (1/12)*slWP[0]*slWP[1]**3                           # waterplane MoI [m^4] about the member's LOCAL x-axis, not the global x-axis
-                    IyWP = (1/12)*slWP[0]**3*slWP[1]                           # waterplane MoI [m^4] about the member's LOCAL y-axis, not the global y-axis
-                    I = np.diag([IxWP, IyWP, 0])                               # area moment of inertia tensor
-                    T = self.R.T                                               # the transformation matrix to unrotate the member's local axes
+                    slWP = intrp(0, rA[2], rB[2], self.sl[i-1], self.sl[i])    # side lengths of member where its axis crosses the waterplane [m]
+                    AWP = slWP[0]*slWP[1] / cosPhi                                     # waterplane area of rectangular member [m^2]
+                    
+                    IxWP = (1/12)*slWP[0]*slWP[1]**3 / cosPhi                          # waterplane MoI [m^4] about the member's LOCAL x-axis, not the global x-axis
+                    IyWP = (1/12)*slWP[0]**3*slWP[1] / (cosPhi**3)                          # waterplane MoI [m^4] about the member's LOCAL y-axis, not the global y-axis
+                    
+                    I = np.diag([IxWP, IyWP])                                  # area moment of inertia tensor
+                    T = np.array([[cosBeta, sinBeta], [-sinBeta, cosBeta]])    # the transformation matrix to unrotate the member's local axes
+                    
                     I_rot = np.matmul(T.T, np.matmul(I,T))                     # area moment of inertia tensor where MoI axes are now in the same direction as PRP
                     IxWP = I_rot[0,0]
                     IyWP = I_rot[1,1]
@@ -817,9 +828,10 @@ class Member:
                 My = M*dPhi_dThy
 
                 Fvec[2] += Fz                           # vertical buoyancy force [N]
-                Fvec[3] += Mx + Fz*rA[1]                # moment about x axis [N-m]
-                Fvec[4] += My - Fz*rA[0]                # moment about y axis [N-m]
-
+                Fvec[3] += Mx + Fz*r_center[1]          # moment about x axis [N-m]  # change the reference point of force form rA to r_center 
+                Fvec[4] += My - Fz*r_center[0]          # moment about y axis [N-m]  # since Fz should act on r_center 
+                                                              
+                                                              
 
                 # normal approach to hydrostatic stiffness, using this temporarily until above fancier approach is verified
                 Cmat[2,2] += -dFz_dz
@@ -871,7 +883,8 @@ class Member:
         
         self.V = V_UW  # store submerged volume
         
-        return Fvec, Cmat, V_UW, r_center, AWP, IWP, xWP, yWP
+        return Fvec, Cmat, V_UW, r_center, AWP, IxWP, IyWP, xWP, yWP # IxWP and IyWP should be both returned @Yang 
+                                                                     # FOWT.calcStatics is thus modified @Yang
 
 
     def calcHydroConstants(self, r_ref=np.zeros(3), sum_inertia=False, rho=1025, g=9.81, k_array=None):
@@ -1316,4 +1329,45 @@ class Member:
         
         return linebit
 
+class TowerMember(Member): # to distinguish aero loads which only act on Tower(s)
 
+    def __init__(self, mi, nw, BEM=[], heading=0):
+        super().__init__(mi, nw, BEM, heading)
+
+    # def getInertia(self, rPRP=np.zeros(3)):
+        
+    #     if self.shape == 'circular' or self.shape == 'rectangular':
+    #         return super().getInertia(rPRP=np.zeros(3))
+
+    #     elif self.shape == 'ellipse': # Only valid for a tower member
+    #         import gmsh
+    #         gmsh.initialize()
+
+    #         self.M_struc = np.zeros([6,6])                  # member mass/inertia matrix [kg, kg-m, kg-m^2]
+
+    #         for i in range(1, len(self.stations)):
+    #             if self.stations[i] == self.stations[i-1]:
+    #                 pass
+
+    #         else:
+
+    #             r0 = self.rA+self.q*self.stations[i-1]
+    #             r1 = self.rA+self.q*self.stations[i]
+
+    #             gmsh.model.occ.addDisk(xc=r0[0], yc=r0[1], zc=r0[2], rx=self.sl[0,0]/2, ry=self.sl[0,1]/2, tag=1, zAxis=self.q)
+                
+    #             gmsh.model.occ.addDisk(xc=r1[0], yc=r1[1], zc=r1[2], rx=self.sl[1,0]/2, ry=self.sl[1,1]/2, tag=2, zAxis=self.q)
+
+    #             gmsh.model.occ.addThruSections([1, 2], makeSolid=False)
+    #             gmsh.model.occ.remove([(2,1), (2,2)])
+
+    #             mass           = gmsh.model.occ.getMass(2, 3) * self.rho_shell * np.mean(self.t)
+    #             cog            = gmsh.model.occ.get_center_of_mass(2,3) - rPRP
+    #             inertia_matrix = gmsh.model.occ.get_matrix_of_inertia(2,3).reshape((3,3)) * self.rho_shell * np.mean(self.t)
+
+    #             gmsh.finalize()
+
+    #             Mmat = np.block([[np.eye(3)*mass, np.zeros((3,3))],[np.zeros((3,3)), inertia_matrix]])
+    #             self.M_struc += translateMatrix6to6DOF(Mmat, cog)
+
+    #             return mass, cog, mass, 0, 0
