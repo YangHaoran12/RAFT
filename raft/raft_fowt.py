@@ -7,9 +7,11 @@ from scipy.interpolate import interp1d, interp2d, griddata
 
 import raft.member2pnl as pnl
 from raft.helpers import *
-from raft.raft_member import Member
+from raft.raft_member import Member, TowerMember
 from raft.raft_rotor import Rotor
 import moorpy as mp
+
+from typing import Iterable, Union
 
 # deleted call to ccblade in this file, since it is called in raft_rotor
 # also ignoring changes to solveEquilibrium3 in raft_model and the re-addition of n=len(stations) in raft_member, based on raft_patch
@@ -103,7 +105,7 @@ class FOWT():
             # note: RNA descriptions are not defined because there is no turbine
 
 
-        self.rotorList = []
+        self.rotorList:Iterable[Rotor] = []
 
         self.depth = depth
 
@@ -115,6 +117,7 @@ class FOWT():
         self.rho_water = getFromDict(design['site'], 'rho_water', default=1025.0)
         self.g         = getFromDict(design['site'], 'g'        , default=9.81)
         self.shearExp_water = getFromDict(design['site'], 'shearExp_water', default=0.12)
+        self.shearExp_air   = getFromDict(design['site'], 'shearExp_air',   default=0.12)
         
         self.potModMaster = getFromDict(design['platform'], 'potModMaster', dtype=int, default=0)
         dlsMax       = getFromDict(design['platform'], 'dlsMax'      , default=5.0)
@@ -125,7 +128,7 @@ class FOWT():
 
 
         # member-based platform description
-        self.memberList = []                                         # list of member objects
+        self.memberList:Iterable[Union[Member,TowerMember]] = []                                         # list of member objects
 
         for mi in design['platform']['members']:
 
@@ -153,7 +156,7 @@ class FOWT():
         if 'turbine' in design:
             if 'tower' in design['turbine']:
                 for mem in design['turbine']['tower']:
-                    self.memberList.append(Member(mem, self.nw))
+                    self.memberList.append(TowerMember(mem, self.nw))
             if 'nacelle' in design['turbine']:
                 for mem in design['turbine']['nacelle']:
                     self.memberList.append(Member(mem, self.nw))
@@ -204,7 +207,8 @@ class FOWT():
         self.f_aero0 = np.zeros([6, self.nrotors])
         # mean weight and hydro force arrays are set elsewhere. In future hydro could include current.
         self.D_hydro = np.zeros(6)      # initialize mean drag force from current - acts as a "static" force, like f_aero0
-
+        # mean tower aero force arrays
+        self.F_tower_aero = np.zeros(6)      # initialize mean drag force acting on tower from wind - acts as a "static" force, like f_aero0
         # flag to signal whether any members will be modeled with BEM
         self.potMod = any([member['potMod']==True for member in design['platform']['members'] ])
 
@@ -367,7 +371,7 @@ class FOWT():
 
             # -------------------- get each member's buoyancy/hydrostatic properties -----------------------
 
-            Fvec, Cmat, V_UW, r_CB, AWP, IWP, xWP, yWP = mem.getHydrostatics(rho=self.rho_water, g=self.g, rPRP=self.r6[:3])
+            Fvec, Cmat, V_UW, r_CB, AWP, IxWP, IyWP, xWP, yWP = mem.getHydrostatics(rho=self.rho_water, g=self.g, rPRP=self.r6[:3])
             
             # add to fowt's mean force vector and stiffness matrix
             self.W_hydro += Fvec # translateForce3to6DOF( np.array([0,0, Fz]), mem.rA )  # buoyancy vector
@@ -376,8 +380,8 @@ class FOWT():
             # convert other metrics to also be about the PRP (platform reference point)
             VTOT    += V_UW    # add to total underwater volume of all members combined
             AWP_TOT += AWP
-            IWPx_TOT += IWP + AWP*yWP**2
-            IWPy_TOT += IWP + AWP*xWP**2
+            IWPx_TOT += IxWP + AWP*yWP**2
+            IWPy_TOT += IyWP + AWP*xWP**2
             Sum_V_rCB   += r_CB*V_UW
             Sum_AWP_rWP += np.array([xWP, yWP])*AWP
             
@@ -423,7 +427,7 @@ class FOWT():
                         # >>>>>> can be used later if actual rectangular mass properties are desired other than mRNA <<<<<<<<
 
                         # calculate hydrostatic properties of the blade (sub)member and add them to the system matrices
-                        Fvec, Cmat, V_UW, r_CB, AWP, IWP, xWP, yWP = afmem.getHydrostatics(rho=self.rho_water, g=self.g, rPRP=self.r6[:3])
+                        Fvec, Cmat, V_UW, r_CB, AWP, IxWP, IyWP, xWP, yWP = afmem.getHydrostatics(rho=self.rho_water, g=self.g, rPRP=self.r6[:3])
                         
                         # outputs of getHydrostatics should already be about the PRP
                         self.W_hydro += Fvec # buoyancy vector
@@ -431,8 +435,8 @@ class FOWT():
 
                         VTOT    += V_UW    # add to total underwater volume of all members combined
                         AWP_TOT += AWP
-                        IWPx_TOT += IWP + AWP*yWP**2
-                        IWPy_TOT += IWP + AWP*xWP**2
+                        IWPx_TOT += IxWP + AWP*yWP**2
+                        IWPy_TOT += IyWP + AWP*xWP**2
                         Sum_V_rCB   += r_CB*V_UW
                         Sum_AWP_rWP += np.array([xWP, yWP])*AWP
 
@@ -449,7 +453,7 @@ class FOWT():
         for mem in nacelleMemberList:
 
             # call getHydroStatics for nacelles
-            Fvec, Cmat, V_UW, r_CB, AWP, IWP, xWP, yWP = mem.getHydrostatics(rho=self.rho_water, g=self.g, rPRP=self.r6[:3])
+            Fvec, Cmat, V_UW, r_CB, AWP, IxWP, IyWP, xWP, yWP = mem.getHydrostatics(rho=self.rho_water, g=self.g, rPRP=self.r6[:3])
             
             # add to fowt's mean force vector and stiffness matrix
             self.W_hydro += Fvec # translateForce3to6DOF( np.array([0,0, Fz]), mem.rA )  # buoyancy vector
@@ -458,8 +462,8 @@ class FOWT():
             # convert other metrics to also be about the PRP (platform reference point)
             VTOT    += V_UW    # add to total underwater volume of all members combined
             AWP_TOT += AWP
-            IWPx_TOT += IWP + AWP*yWP**2
-            IWPy_TOT += IWP + AWP*xWP**2
+            IWPx_TOT += IxWP + AWP*yWP**2
+            IWPy_TOT += IyWP + AWP*xWP**2
             Sum_V_rCB   += r_CB*V_UW
             Sum_AWP_rWP += np.array([xWP, yWP])*AWP
         
@@ -1380,6 +1384,76 @@ class FOWT():
         self.D_hydro = D_hydro  # save hydro drag forces/moments to FOWT for later access
 
         return D_hydro
+
+    def calcTowerAeroLoads(self, case):
+        '''method to calculate the "static" aero loads on each Towermember and save as a aero force
+        Uses a simple power law relationship to calculate the wind velocity as a function of member node depth'''
+
+        rho = self.rho_water
+        g   = self.g
+
+        F_tower_aero = np.zeros(6)      # create variable to hold the total drag force
+
+        # extract current variables out of the case dictionary
+        speed = getFromDict(case, 'wind_speed', shape=0, default=0.0)
+        heading = getFromDict(case, 'wind_heading', shape=0, default=0)
+
+        hHub = self.rotorList[0].hHub
+        for mem in self.memberList:
+
+            circ = mem.shape=='circular'  # convenience boolian for circular vs. rectangular cross sections
+            if type(mem) is TowerMember:
+            # loop through each node of the member
+                for il in range(mem.ns):
+
+                    # only process hydrodynamics if this node is submerged
+                    if mem.r[il,2] > 0:
+
+                        # calculate current velocity as a function of node depth [x,y,z] (assumes no vertical current velocity)
+                        v = speed * (mem.r[il,2]/hHub)**self.shearExp_air
+                        #v = speed
+                        vcur = np.array([v*np.cos(np.deg2rad(heading)), v*np.sin(np.deg2rad(heading)), 0])
+
+                        # interpolate coefficients for the current strip
+                        Cd_p1  = np.interp( mem.ls[il], mem.stations, mem.Cd_p1 )
+                        Cd_p2  = 0   # a fix lift coefficient, equals 0 in most conditions, so force it to be 0 now
+                        # Cd_End = np.interp( mem.ls[il], mem.stations, mem.Cd_End)
+
+                        # current (relative) velocity over node (no complex numbers bc not function of frequency)
+                        vrel = np.array(vcur)
+                        # break out velocity components in each direction relative to member orientation
+                        vrel_q  = np.inner(vrel, mem.q )*mem.q[:]
+                        vrel_p  = vrel-vrel_q 
+                        vrel_p1 = np.inner(vrel, mem.p1)*mem.p1[:]
+                        vrel_p2 = np.inner(vrel, mem.p2)*mem.p2[:]  
+
+                        # ----- compute side effects ------------------------
+
+                        # member acting area assigned to this node in each direction
+                        # a_i_q  = np.pi*mem.ds[il]*mem.dls[il]  if circ else  2*(mem.ds[il,0]+mem.ds[il,0])*mem.dls[il]
+                        a_i_p1 =       mem.ds[il]*mem.dls[il]  if circ else             mem.ds[il,0]      *mem.dls[il]
+                        a_i_p2 =       mem.ds[il]*mem.dls[il]  if circ else             mem.ds[il,1]      *mem.dls[il]
+
+                        # calculate drag force wrt to each orientation using simple Morison's drag equation
+                        # Dq = 0.5 * rho * a_i_q * Cd_q * np.linalg.norm(vrel_q) * vrel_q
+
+                        if circ: # Use the norm of the total perpendicular relative velocity
+                            normVrel_p1 = np.linalg.norm(vrel_p)
+                            normVrel_p2 = normVrel_p1
+                        else: # Otherwise treat each direction separately
+                            normVrel_p1 = np.linalg.norm(vrel_p1)
+                            normVrel_p2 = np.linalg.norm(vrel_p2)
+                        Dp1 = 0.5 * rho * a_i_p1 * Cd_p1 * normVrel_p1 * vrel_p1
+                        Dp2 = 0.5 * rho * a_i_p2 * Cd_p2 * normVrel_p2 * vrel_p2
+
+                        # ----- sum forces and add to total mean drag load about PRP ------
+                        D =  Dp1 + Dp2     # sum drag forces at node in member's local orientation frame
+
+                        F_tower_aero += translateForce3to6DOF(D, mem.r[il,:] - self.r6[:3])  # sum as forces and moments about PRP
+                    
+        self.F_tower_aero = F_tower_aero  # save hydro drag forces/moments to FOWT for later access
+
+        return F_tower_aero
 
 
     def calcQTF_slenderBody(self, waveHeadInd, Xi0=None, verbose=False, iCase=None, iWT=None):
