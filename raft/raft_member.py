@@ -7,6 +7,9 @@ from raft.helpers import *
 from moorpy.helpers import transformPosition
 from scipy.special import jn, yn, jv, kn, hankel1
 
+from mpl_toolkits.mplot3d import Axes3D
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
 ## This class represents linear (for now cylindrical and rectangular) components in the substructure.
 #  It is meant to correspond to Member objects in the WEIS substructure ontology, but containing only
 #  the properties relevant for the Level 1 frequency-domain model, as well as additional data strucutres
@@ -38,7 +41,7 @@ class Member:
         self.rB0 = np.array(mi['rB'], dtype=np.double)               # [x,y,z] coordinates of upper node relative to PRP [m]
         if (self.rA0[2] == 0 or self.rB0[2] == 0) and self.type != 3:
             raise ValueError("RAFT Members cannot start or end on the waterplane")
-        if self.rB0[2] < self.rA0[2]:
+        if self.rB0[2] < self.rA0[2] and self.type != "airfoil" :
             print(f"The z position of rA is {self.rA0[2]}, and the z position of rB is {self.rB0[2]}. RAFT Members can have trouble when their rA position is below the rB position. Switching rA and rB now.")
             self.rA0 = np.array(mi['rB'], dtype=np.double)
             self.rB0 = np.array(mi['rA'], dtype=np.double)
@@ -93,6 +96,11 @@ class Member:
 
             self.sl    = getFromDict(mi, 'd', shape=[n,2])           # array of side lengths of nodes along member [m]
 
+        elif shape[0].lower() == 'e':    #  ellipse geometry
+            self.shape = 'ellipse'
+
+            self.sl    = getFromDict(mi, 'd', shape=[n,2]) 
+        
         else:
             raise ValueError('The only allowable shape strings are circular and rectangular')
 
@@ -186,7 +194,7 @@ class Member:
             if lstrip > 0.0:
                 ns= int(np.ceil( (lstrip) / dlsMax ))             # number of strips to split this segment into
                 dlstrip = lstrip/ns
-                m   = 0.5*(dorsl[i] - dorsl[i-1])/lstrip          # taper ratio
+                m   = 0.5*(dorsl[i] - dorsl[i-1])/lstrip          # taper ratio of the current strip @Yang
                 ls  += [self.stations[i-1] + dlstrip*(0.5+j) for j in range(ns)] # add node locations
                 dls += [dlstrip]*ns
                 ds  += [dorsl[i-1] + dlstrip*2*m*(0.5+j) for j in range(ns)]
@@ -213,7 +221,7 @@ class Member:
         self.dls = np.array(dls)
         self.ds  = np.array(ds)
         self.drs = np.array(drs)
-        self.mh  = np.array(m)
+        self.mh  = np.array(m)                                       # Not very useful @Yang
 
         self.r   = np.zeros([self.ns,3])                             # undisplaced node positions along member  [m]
         for i in range(self.ns):
@@ -301,7 +309,12 @@ class Member:
         # matrices of vector multiplied by vector transposed, used in computing force components
         self.qMat  = VecVecTrans(self.q)
         self.p1Mat = VecVecTrans(self.p1)
-        self.p2Mat = VecVecTrans(self.p2)                 
+        self.p2Mat = VecVecTrans(self.p2) 
+
+        # Potential more convenient way @Yang
+        # self.qMat = np.outer(q, q)
+        # self.p1Mat = np.outer(p1, p1)
+        # self.p2Mat = np.outer(p2, p2)                
 
 
     def getInertia(self, rPRP=np.zeros(3)):
@@ -532,7 +545,7 @@ class Member:
             mshell += m_shell                           # total mass of the shell material only of the member [kg]
             self.vfill.append(v_fill)                        # list of ballast volumes in each submember [m^3]
             mfill.append(m_fill)                        # list of ballast masses in each submember [kg]
-            pfill.append(rho_fill)                     # list of ballast densities in each submember [kg]
+            pfill.append(rho_fill)                     # list of ballast densities in each submember [kg/m^3]
             
             # create a local submember mass matrix
             Mmat = np.diag([mass, mass, mass, 0, 0, 0]) # submember's mass matrix without MoI tensor
@@ -702,7 +715,9 @@ class Member:
 
         mass = self.M_struc[0,0]        # total mass of the entire member [kg]
         center = mass_center/mass       # total center of mass of the entire member from the PRP [m]
-
+        
+        self.mass = mass
+        self.center = center
 
         return mass, center, mshell, mfill, pfill
 
@@ -851,7 +866,7 @@ class Member:
                 r_center = rA + self.q*hc             # center of volume of this segment relative to PRP [m]
 
                 # buoyancy force (and moment) vector
-                Fvec += translateForce3to6DOF(np.array([0, 0, rho*g*V_UWi]), r_center)
+                Fvec += translateForce3to6DOF(np.array([0, 0, rho*g*V_UWi]), r_center) # 6 DOF force/moment relavent to np.array([rPRP[0], rPRP[1], 0])
 
                 # hydrostatic stiffness matrix (about end A)
                 Cmat[3,3] += rho*g*V_UWi * r_center[2]
@@ -873,6 +888,177 @@ class Member:
         
         return Fvec, Cmat, V_UW, r_center, AWP, IWP, xWP, yWP
 
+    def getHydrostaticsYang(self, rPRP=np.zeros(3), rho=1025, g=9.81):
+        '''Calculates member hydrostatic properties, namely buoyancy and stiffness matrix.
+        Properties are calculated relative to the platform reference point (PRP) in the
+        global orientation directions.
+        
+        Parameters
+        ----------
+        rPRP : float array
+            Coordinates of the platform reference point (the first three entries of fowt.Xi0),
+            which the moment of inertia matrix will be calculated relative to. [m]
+        '''
+    
+        pi = np.pi
+
+        # initialize some values that will be returned
+        Fvec = np.zeros(6)              # this will get added to by each segment of the member
+        Cmat = np.zeros([6,6])          # this will get added to by each segment of the member
+        V_UW = 0                        # this will get added to by each segment of the member
+        r_centerV = np.zeros(3)         # center of buoyancy times volumen total - will get added to by each segment
+        # these will only get changed once, if there is a portion crossing the water plane
+        AWP = 0
+        IWP = 0
+        IxWP = 0
+        IyWP = 0
+        xWP = 0
+        yWP = 0
+
+
+        # loop through each member segment, and treat each segment like how we used to treat each member
+        n = len(self.stations)
+
+        for i in range(1,n):     # starting at 1 rather than 0 because we're looking at the sections (from station i-1 to i)
+
+            # calculate end locations for this segment relative to the point on 
+            # the waterplane directly above the PRP in unrotated directions (rHS_ref)
+            rHS_ref = np.array([rPRP[0], rPRP[1], 0])
+            # find the start & end postion of each stations segment
+            rA = self.rA + self.q*self.stations[i-1] - rHS_ref
+            rB = self.rA + self.q*self.stations[i  ] - rHS_ref
+
+            # partially submerged case
+            if rA[2]*rB[2] <= 0:    # if member crosses (or touches) water plane
+
+                # angles
+                beta = np.arctan2(self.q[1],self.q[0])  # member incline heading from x axis
+                phi  = np.arctan2(np.sqrt(self.q[0]**2 + self.q[1]**2), self.q[2])  # member incline angle from vertical
+
+                # precalculate trig functions
+                cosPhi=np.cos(phi)
+                sinPhi=np.sin(phi)
+                tanPhi=np.tan(phi)
+                cosBeta=np.cos(beta)
+                sinBeta=np.sin(beta)
+                tanBeta=sinBeta/cosBeta
+
+                # -------------------- buoyancy and waterplane area properties ------------------------
+
+                xWP = intrp(0, rA[2], rB[2], rA[0], rB[0])                     # x coordinate where member axis cross the waterplane [m]
+                yWP = intrp(0, rA[2], rB[2], rA[1], rB[1])                     # y coordinate where member axis cross the waterplane [m]
+                if self.shape=='circular':
+                    dWP = intrp(0, rA[2], rB[2], self.d[i-1], self.d[i])       # diameter of member where its axis crosses the waterplane [m]
+                    AWP = np.pi*(dWP/2)**2/cosPhi                              # waterplane area of member [m^2]                          
+                    IxWP = np.pi/64*dWP**4/cosPhi                                               
+                    IyWP = np.pi/64*dWP**4/(cosPhi**3)       
+                    I = np.diag([IxWP, IyWP])
+                    T = np.array([[cosBeta, -sinBeta], [sinBeta, cosBeta]])
+                    I_rot = np.matmul(T.T, np.matmul(I, T))                    # rotate in the opposite direction T*I*T.T turns tp T.T*I*T
+                    IxWP = I_rot[0,0]
+                    IyWP = I_rot[1,1]                                                
+                elif self.shape=='rectangular':
+                    slWP = intrp(0, rA[2], rB[2], self.sl[i-1], self.sl[i])    # side lengths of member where its axis crosses the waterplane [m]
+                    slWP[0] /= cosPhi
+                    AWP = slWP[0]*slWP[1]                                      # waterplane area of rectangular member [m^2]
+                    IxWP = (1/12)*slWP[0]*slWP[1]**3                           # waterplane MoI [m^4] about the member's LOCAL x-axis, not the global x-axis
+                    IyWP = (1/12)*slWP[0]**3*slWP[1]                           # waterplane MoI [m^4] about the member's LOCAL y-axis, not the global y-axis
+                    I = np.diag([IxWP, IyWP])
+                    T = np.array([[cosBeta, -sinBeta], [sinBeta, cosBeta]])
+                    I_rot = np.matmul(T.T, np.matmul(I, T))
+                    IxWP = I_rot[0,0]
+                    IyWP = I_rot[1,1]
+
+                LWP = abs(rA[2]/cosPhi)                   # get length of segment along member axis that is underwater [m]
+
+                # Assumption: the areas and MoI of the waterplane are as if the member were completely vertical, i.e. it doesn't account for phi
+                # This can be fixed later on if needed. We're using this assumption since the fix wouldn't significantly affect the outputs
+
+                # Total enclosed underwater volume [m^3] and distance along axis from end A to center of buoyancy of member [m]
+                if self.shape=='circular':
+                    V_UWi, hc = FrustumVCV(self.d[i-1], dWP, LWP)
+                elif self.shape=='rectangular':
+                    V_UWi, hc = FrustumVCV(self.sl[i-1], slWP, LWP)
+
+                r_center = rA + self.q*hc          # absolute coordinates of center of volume of this segment [m]
+
+
+                # >>>> question: should this function be able to use displaced/rotated values? <<<<
+
+                # ------------- get hydrostatic derivatives ----------------
+
+                # derivatives from global to local
+                dPhi_dThx  = -sinBeta                     # \frac{d\phi}{d\theta_x} = \sin\beta
+                dPhi_dThy  =  cosBeta
+                dFz_dz   = -rho*g*AWP /cosPhi
+
+                # note: below calculations are based on untapered case, but
+                # temporarily approximated for taper by using dWP (diameter at water plane crossing) <<< this is rough
+
+                # buoyancy force and moment about end A
+                Fz = rho*g* V_UWi
+                M = 0
+                if self.shape=='circular': # Need to find the equivalent of this for the rectangular case
+                    M  = -rho*g*pi*( dWP**2/32*(2.0 + tanPhi**2) + 0.5*(rA[2]/cosPhi)**2)*sinPhi  # moment about axis of incline
+                Mx = M*dPhi_dThx
+                My = M*dPhi_dThy
+
+                Fvec[2] += Fz                           # vertical buoyancy force [N]
+                Fvec[3] += Mx + Fz*rA[1]                # moment about x axis [N-m]
+                Fvec[4] += My - Fz*rA[0]                # moment about y axis [N-m]
+
+
+                # normal approach to hydrostatic stiffness, using this temporarily until above fancier approach is verified
+                Cmat[2,2] += -dFz_dz
+                Cmat[2,3] += rho*g*(     -AWP*yWP    )
+                Cmat[2,4] += rho*g*(      AWP*xWP    )
+                Cmat[3,2] += rho*g*(     -AWP*yWP    )
+                Cmat[3,3] += rho*g*(IxWP + AWP*yWP**2 )
+                Cmat[3,4] += rho*g*(      AWP*xWP*yWP)
+                Cmat[4,2] += rho*g*(      AWP*xWP    )
+                Cmat[4,3] += rho*g*(      AWP*xWP*yWP)
+                Cmat[4,4] += rho*g*(IyWP + AWP*xWP**2 )
+
+                Cmat[3,3] += rho*g*V_UWi * r_center[2]
+                Cmat[4,4] += rho*g*V_UWi * r_center[2]
+
+                V_UW += V_UWi
+                r_centerV += r_center*V_UWi
+
+
+            # fully submerged case
+            elif rA[2] <= 0 and rB[2] <= 0:
+
+                # displaced volume [m^3] and distance along axis from end A to center of buoyancy of member [m]
+                if self.shape=='circular':
+                    V_UWi, hc = FrustumVCV(self.d[i-1], self.d[i], self.stations[i]-self.stations[i-1])
+                elif self.shape=='rectangular':
+                    V_UWi, hc = FrustumVCV(self.sl[i-1], self.sl[i], self.stations[i]-self.stations[i-1])
+
+                r_center = rA + self.q*hc             # center of volume of this segment relative to PRP [m]
+
+                # buoyancy force (and moment) vector
+                Fvec += translateForce3to6DOF(np.array([0, 0, rho*g*V_UWi]), r_center)
+
+                # hydrostatic stiffness matrix (about end A)
+                Cmat[3,3] += rho*g*V_UWi * r_center[2]
+                Cmat[4,4] += rho*g*V_UWi * r_center[2]
+
+                V_UW += V_UWi
+                r_centerV += r_center*V_UWi
+
+            else: # if the members are fully above the surface
+
+                pass
+
+        if V_UW > 0:
+            r_center = r_centerV/V_UW    # calculate overall member center of buoyancy
+        else:
+            r_center = np.zeros(3)       # temporary fix for out-of-water members
+        
+        self.V = V_UW  # store submerged volume
+        
+        return Fvec, Cmat, V_UW, r_center, AWP, IWP, xWP, yWP, IxWP, IyWP
 
     def calcHydroConstants(self, r_ref=np.zeros(3), sum_inertia=False, rho=1025, g=9.81, k_array=None):
         '''Compute the Member's linear strip-theory-hydrodynamics terms, 
@@ -968,6 +1154,8 @@ class Member:
             return A_hydro, I_hydro
         else:
             return A_hydro
+        
+    
 
     def calcImat(self, rho=1025, g=9.81, k_array=None):
         '''Compute the Member's linear strip-theory-hydrodynamics excitation 
@@ -1009,6 +1197,7 @@ class Member:
                         v_i = self.ds[il,0]*self.ds[il,1]*self.dls[il]  
                         
                     if self.r[il,2] + 0.5*self.dls[il] > 0:    # if member extends out of water 
+                        # A simplified approach @Yang
                         v_i = v_i * (0.5*self.dls[il] - self.r[il,2]) / self.dls[il]  # scale volume by the portion that is under water
                                        
                     # Local inertial excitation matrix - Froude-Krylov  
@@ -1213,6 +1402,12 @@ class Member:
         I = 0        
         
         return A, I
+    
+    def getMemberInertia(self):
+        '''Get member mass matrix M_struc, member mass and member gravity center.'''
+
+        return self.M_struc, self.mass, self.center
+
 
     def plot(self, ax, r_ptfm=[0,0,0], R_ptfm=[], color='k', nodes=0, 
              station_plot=[], plot2d=False, Xuvec=[1,0,0], Yuvec=[0,0,1], zorder=2):
@@ -1315,5 +1510,282 @@ class Member:
                 ax.scatter(self.r[:,0], self.r[:,1], self.r[:,2])
         
         return linebit
+    
+    def plotSurface(self, ax, r_ptfm=[0,0,0], R_ptfm=[], color='k', nodes=0, 
+             station_plot=[], plot2d=False, Xuvec=[1,0,0], Yuvec=[0,0,1], zorder=2):
+        '''Draws the member on the passed axes, and optional platform offset and rotation matrix
+        
+        Parameters
+        ----------
+        
+        plot2d: bool
+            If true, produces a 2d plot on the axes defined by Xuvec and Yuvec. 
+            Otherwise produces a 3d plot (default).
+        
+        '''   
+        # support self color option
+        
+        if color == 'self':
+            color = self.color  # attempt to allow custom colors
+        
+        
+        # --- get coordinates of member edges in member reference frame -------------------
+
+        if not station_plot:
+            m = np.arange(0, len(self.stations), 1)
+        else:
+            m = station_plot
+
+        # lists to be filled with coordinates for plotting
+
+        if self.shape=="circular":   # circular member cross section
+
+            n_theta = 30
+            n_z = 2
+
+            theta= np.linspace(0, 2*np.pi, n_theta)
+            z = np.linspace(0, self.l, n_z)
+            r = np.linspace(0.5*self.d[0], 0.5*self.d[-1], n_z)
+
+            theta_grid, z_grid = np.meshgrid(theta, z)
+            x_grid = r[:, np.newaxis] * np.cos(theta_grid)
+            y_grid = r[:, np.newaxis] * np.sin(theta_grid)
+
+            for i in range(n_z):
+                Mtmp = np.matmul(self.R, np.array([x_grid[i, :], y_grid[i, :], z_grid[i, :]]))
+                x_grid[i, :] = Mtmp[0, :] + self.rA[0] + r_ptfm[0]
+                y_grid[i, :] = Mtmp[1, :] + self.rA[1] + r_ptfm[1]
+                z_grid[i, :] = Mtmp[2, :] + self.rA[2] + r_ptfm[2]
+
+            ax.plot_surface(x_grid, y_grid, z_grid, alpha=0.5)
+
+            x_min = np.min(x_grid)
+            x_max = np.max(x_grid)
+            y_min = np.min(y_grid)
+            y_max = np.max(y_grid)
+
+            x_plane, y_plane = np.meshgrid(np.linspace(x_min*5, x_max*5, 2), np.linspace(y_min*5, y_max*5, 2))
+            ax.plot_surface(x_plane, y_plane, np.zeros_like(x_plane), alpha=0.5, color='gray')
+
+            ax.set_xlim([x_min*5, x_max*5])
+            ax.set_ylim([y_min*5, y_max*5])
+            ax.set_xlabel('X axis')
+            ax.set_ylabel('Y axis')
+            ax.set_zlabel('Z axis')
+            plt.axis('equal') 
+            plt.show()
+      
+
+        elif self.shape=="rectangular":    # rectangular member cross section
+
+            lx_bot = 0.5*self.sl[0, 1]
+            ly_bot = 0.5*self.sl[0, 0]
+
+            lx_top = 0.5*self.sl[-1, 1]
+            ly_top = 0.5*self.sl[-1, 0]
+
+            x_bot = [-lx_bot, lx_bot, lx_bot, -lx_bot]
+            y_bot = [-ly_bot, -ly_bot, ly_bot, ly_bot]
+            z_bot = [0, 0, 0, 0]
+
+            x_top = [-lx_top, lx_top, lx_top, -lx_top]
+            y_top = [-ly_top, -ly_top, ly_top, ly_top]
+            z_top = [self.l, self.l, self.l, self.l]
+
+            r_bot = np.matmul(self.R, np.array([x_bot, y_bot, z_bot])) \
+                        + np.array([[self.rA[0]],[self.rA[1]],[self.rA[2]]]) \
+                        + np.array([[r_ptfm[0]],[r_ptfm[1]],[r_ptfm[2]]])
+
+            r_top = np.matmul(self.R, np.array([x_top, y_top, z_top])) \
+                    + np.array([[self.rA[0]],[self.rA[1]],[self.rA[2]]]) \
+                    + np.array([[r_ptfm[0]],[r_ptfm[1]],[r_ptfm[2]]])
+
+            points = [[r_bot[0, 0], r_bot[1, 0], r_bot[2, 0]],
+                      [r_bot[0, 1], r_bot[1, 1], r_bot[2, 1]],
+                      [r_top[0, 1], r_top[1, 1], r_top[2, 1]],
+                      [r_top[0, 0], r_top[1, 0], r_top[2, 0]]]
+            verts = [points]
+            poly3d = Poly3DCollection(verts, alpha=0.5, edgecolor='k')
+            ax.add_collection3d(poly3d)
+
+            points = [[r_bot[0, 1], r_bot[1, 1], r_bot[2, 1]],
+                      [r_bot[0, 2], r_bot[1, 2], r_bot[2, 2]],
+                      [r_top[0, 2], r_top[1, 2], r_top[2, 2]],
+                      [r_top[0, 1], r_top[1, 1], r_top[2, 1]]]
+            verts = [points]
+            poly3d = Poly3DCollection(verts, alpha=0.5, edgecolor='k')
+            ax.add_collection3d(poly3d)
+
+            points = [[r_bot[0, 2], r_bot[1, 2], r_bot[2, 2]],
+                      [r_bot[0, 3], r_bot[1, 3], r_bot[2, 3]],
+                      [r_top[0, 3], r_top[1, 3], r_top[2, 3]],
+                      [r_top[0, 2], r_top[1, 2], r_top[2, 2]]]
+            verts = [points]
+            poly3d = Poly3DCollection(verts, alpha=0.5, edgecolor='k')
+            ax.add_collection3d(poly3d)
+
+            points = [[r_bot[0, 3], r_bot[1, 3], r_bot[2, 3]],
+                      [r_bot[0, 0], r_bot[1, 0], r_bot[2, 0]],
+                      [r_top[0, 0], r_top[1, 0], r_top[2, 0]],
+                      [r_top[0, 3], r_top[1, 3], r_top[2, 3]]]
+            verts = [points]
+            poly3d = Poly3DCollection(verts, alpha=0.5, edgecolor='k')
+            ax.add_collection3d(poly3d)
+
+            x_min = np.min(np.append(r_bot[0], r_top[0]))
+            x_max = np.max(np.append(r_bot[0], r_top[0]))
+            y_min = np.min(np.append(r_bot[1], r_top[1]))
+            y_max = np.max(np.append(r_bot[1], r_top[1]))
+
+            x_plane, y_plane = np.meshgrid(np.linspace(x_min*5, x_max*5, 2), np.linspace(y_min*5, y_max*5, 2))
+            ax.plot_surface(x_plane, y_plane, np.zeros_like(x_plane), alpha=0.5, color='gray')
+
+            ax.set_xlabel('X axis')
+            ax.set_ylabel('Y axis')
+            ax.set_zlabel('Z axis')
+            plt.axis('equal') 
 
 
+    def plotSurfaceStations(self, ax, r_ptfm=[0,0,0], R_ptfm=[], color='k', nodes=0, 
+             station_plot=[], plot2d=False, Xuvec=[1,0,0], Yuvec=[0,0,1], zorder=2):
+        '''Draws the member on the passed axes, and optional platform offset and rotation matrix
+        
+        Parameters
+        ----------
+        
+        plot2d: bool
+            If true, produces a 2d plot on the axes defined by Xuvec and Yuvec. 
+            Otherwise produces a 3d plot (default).
+        
+        '''   
+        # support self color option
+        
+        if color == 'self':
+            color = self.color  # attempt to allow custom colors
+        
+        
+        # --- get coordinates of member edges in member reference frame -------------------
+
+        if not station_plot:
+            m = np.arange(0, len(self.stations), 1)
+        else:
+            m = station_plot
+
+        # lists to be filled with coordinates for plotting
+
+        if self.shape=="circular":   # circular member cross section
+
+            n_theta = 30
+            n_z = 2
+
+            tmp = []
+            for j in range(1, len(self.stations)):
+
+                theta= np.linspace(0, 2*np.pi, n_theta)
+                z = np.linspace(self.stations[j-1], self.stations[j], n_z)
+                r = np.linspace(0.5*self.d[j-1], 0.5*self.d[j], n_z)
+
+                theta_grid, z_grid = np.meshgrid(theta, z)
+                x_grid = r[:, np.newaxis] * np.cos(theta_grid)
+                y_grid = r[:, np.newaxis] * np.sin(theta_grid)
+
+                for i in range(n_z):
+                    Mtmp = np.matmul(self.R, np.array([x_grid[i, :], y_grid[i, :], z_grid[i, :]]))
+                    x_grid[i, :] = Mtmp[0, :] + self.rA[0] + r_ptfm[0]
+                    y_grid[i, :] = Mtmp[1, :] + self.rA[1] + r_ptfm[1]
+                    z_grid[i, :] = Mtmp[2, :] + self.rA[2] + r_ptfm[2]
+
+                tmp.append(ax.plot_surface(x_grid, y_grid, z_grid, alpha=0.5))
+
+            x_min = np.min(x_grid)
+            x_max = np.max(x_grid)
+            y_min = np.min(y_grid)
+            y_max = np.max(y_grid)
+
+            x_plane, y_plane = np.meshgrid(np.linspace(x_min*5, x_max*5, 2), np.linspace(y_min*5, y_max*5, 2))
+            ax.plot_surface(x_plane, y_plane, np.zeros_like(x_plane), alpha=0.5, color='gray')
+
+            ax.set_xlim([x_min*5, x_max*5])
+            ax.set_ylim([y_min*5, y_max*5])
+            ax.set_xlabel('X axis')
+            ax.set_ylabel('Y axis')
+            ax.set_zlabel('Z axis')
+            plt.axis('equal') 
+            plt.show()
+      
+
+        elif self.shape=="rectangular":    # rectangular member cross section
+
+            lx_bot = 0.5*self.sl[0, 1]
+            ly_bot = 0.5*self.sl[0, 0]
+
+            lx_top = 0.5*self.sl[-1, 1]
+            ly_top = 0.5*self.sl[-1, 0]
+
+            x_bot = [-lx_bot, lx_bot, lx_bot, -lx_bot]
+            y_bot = [-ly_bot, -ly_bot, ly_bot, ly_bot]
+            z_bot = [0, 0, 0, 0]
+
+            x_top = [-lx_top, lx_top, lx_top, -lx_top]
+            y_top = [-ly_top, -ly_top, ly_top, ly_top]
+            z_top = [self.l, self.l, self.l, self.l]
+
+            r_bot = np.matmul(self.R, np.array([x_bot, y_bot, z_bot])) \
+                        + np.array([[self.rA[0]],[self.rA[1]],[self.rA[2]]]) \
+                        + np.array([[r_ptfm[0]],[r_ptfm[1]],[r_ptfm[2]]])
+
+            r_top = np.matmul(self.R, np.array([x_top, y_top, z_top])) \
+                    + np.array([[self.rA[0]],[self.rA[1]],[self.rA[2]]]) \
+                    + np.array([[r_ptfm[0]],[r_ptfm[1]],[r_ptfm[2]]])
+
+            points = [[r_bot[0, 0], r_bot[1, 0], r_bot[2, 0]],
+                      [r_bot[0, 1], r_bot[1, 1], r_bot[2, 1]],
+                      [r_top[0, 1], r_top[1, 1], r_top[2, 1]],
+                      [r_top[0, 0], r_top[1, 0], r_top[2, 0]]]
+            verts = [points]
+            poly3d = Poly3DCollection(verts, alpha=0.5, edgecolor='k')
+            ax.add_collection3d(poly3d)
+
+            points = [[r_bot[0, 1], r_bot[1, 1], r_bot[2, 1]],
+                      [r_bot[0, 2], r_bot[1, 2], r_bot[2, 2]],
+                      [r_top[0, 2], r_top[1, 2], r_top[2, 2]],
+                      [r_top[0, 1], r_top[1, 1], r_top[2, 1]]]
+            verts = [points]
+            poly3d = Poly3DCollection(verts, alpha=0.5, edgecolor='k')
+            ax.add_collection3d(poly3d)
+
+            points = [[r_bot[0, 2], r_bot[1, 2], r_bot[2, 2]],
+                      [r_bot[0, 3], r_bot[1, 3], r_bot[2, 3]],
+                      [r_top[0, 3], r_top[1, 3], r_top[2, 3]],
+                      [r_top[0, 2], r_top[1, 2], r_top[2, 2]]]
+            verts = [points]
+            poly3d = Poly3DCollection(verts, alpha=0.5, edgecolor='k')
+            ax.add_collection3d(poly3d)
+
+            points = [[r_bot[0, 3], r_bot[1, 3], r_bot[2, 3]],
+                      [r_bot[0, 0], r_bot[1, 0], r_bot[2, 0]],
+                      [r_top[0, 0], r_top[1, 0], r_top[2, 0]],
+                      [r_top[0, 3], r_top[1, 3], r_top[2, 3]]]
+            verts = [points]
+            poly3d = Poly3DCollection(verts, alpha=0.5, edgecolor='k')
+            ax.add_collection3d(poly3d)
+
+            x_min = np.min(np.append(r_bot[0], r_top[0]))
+            x_max = np.max(np.append(r_bot[0], r_top[0]))
+            y_min = np.min(np.append(r_bot[1], r_top[1]))
+            y_max = np.max(np.append(r_bot[1], r_top[1]))
+
+            x_plane, y_plane = np.meshgrid(np.linspace(x_min*5, x_max*5, 2), np.linspace(y_min*5, y_max*5, 2))
+            ax.plot_surface(x_plane, y_plane, np.zeros_like(x_plane), alpha=0.5, color='gray')
+
+            ax.set_xlabel('X axis')
+            ax.set_ylabel('Y axis')
+            ax.set_zlabel('Z axis')
+            plt.axis('equal') 
+
+            return tmp
+
+class TowerMember(Member):
+
+    def __init__(self, mi, nw, BEM=[], heading=0):
+        super().__init__(mi, nw, BEM, heading)

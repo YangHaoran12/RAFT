@@ -17,7 +17,7 @@ from raft.helpers import rotationMatrix, getFromDict, rotateMatrix3, rotateMatri
 try:
     from ccblade.ccblade import CCBlade, CCAirfoil
 except:
-    from wisdem.ccblade.ccblade import CCBlade, CCAirfoil
+    from wisdem.ccblade.ccblade import CCBlade, CCAirfoil, _bem
 
 
 import pickle
@@ -242,7 +242,7 @@ class Rotor:
 
         # Set discretization parameters
         nSector = getFromDict(turbine['blade'][ir], 'nSector', default=4) # number of equally spaced azimuthal positions for CCblade to compute and average over
-        nr = getFromDict(turbine['blade'][ir], 'nr', default=20) # number of radial blade stations (or blade elements) to use
+        nr = int(getFromDict(turbine['blade'][ir], 'nr', default=20)) # number of radial blade stations (or blade elements) to use
         
         grid = np.linspace(0., 1., nr, endpoint=False) + 0.5/nr # equally spaced grid along blade span, root=0 tip=1
 
@@ -517,7 +517,61 @@ class Rotor:
             self.bladeMemberList.append(Member(airfoil, len(self.w)))
     """
 
+    # def bladeAirfoil2Member(self, Ca_edge=0.5, Ca_flap=1.0):
+    #     '''First iteration of a method to create RAFT members for the rotor blades (not used right now).
 
+    #     Method to create members for each airfoil in the turbine blade
+    #     To be used for added mass and buoyancy calculations of underwater turbines'''
+        
+    #     self.bladeMemberList = []
+    #     blade_length = self.R_rot-self.Rhub
+    #     # blade_r = np.array(self.)*blade_length
+
+    #     airfoil_name_dict = [foil['name'] for foil in self.turbine['airfoils']]
+
+    #     for i,af in enumerate(self.balde_r[:-1]):
+    #         airfoil = {}        # dictionary to hold properties of blade sub-member = each airfoil
+    #         airfoil['name'] = af+'-'+str(i+1)+'/'+str(len(station_airfoil))
+    #         airfoil['type'] = 3
+
+    #         # started a fancy method to determine the axis that the airfoil blades will have different headings about
+    #         # ideally, I want to find a vector (r) orthogonal to the rotor axis vector (n), which has infinite solutions (r dot n = 0)
+    #         # the way I set it up below rotates the rotor axis vector 90 degrees, but breaks down if rotor.axis[2] != 0 since the rotation metrix used here is about the z axis
+    #         airfoil_zero_heading = np.matmul(np.array([[0, -1, 0],[1, 0, 0],[0, 0, 1]]), self.q_rel)
+    #         airfoil['rA'] = np.array(airfoil_zero_heading)*(self.Rhub+(station_position[i]*blade_length))
+    #         airfoil['rB'] = airfoil['rA'] + np.array(airfoil_zero_heading)*((station_position[i+1]-station_position[i])*blade_length)
+
+    #         #airfoil['rA'] = rHub + np.array([0,0,self.Rhub]) + np.array([0,0,(station_position[i])*blade_length])
+    #         #airfoil['rB'] = airfoil['rA'] + np.array([0,0, (station_position[i+1]-station_position[i])*blade_length])
+    #         # >>>>>>>> don't need to specify direction of blade; just assume vertical and then can transform in later operations <<<<<<<<<<<<<
+    #         airfoil['shape'] = 'rect'
+    #         airfoil['stations'] = [0,1]
+
+    #         chord = np.interp(blade_r[i], self.blade_r, self.blade_chord)
+    #         rel_t = self.turbine["airfoils"][airfoil_name_dict.index(af)]["relative_thickness"]
+    #         A = (np.pi/4)*chord**2 * rel_t
+    #         sideB = A/chord     # the length of the imaginary side length of the rectange that gives the same area
+
+    #         airfoil['d'] = [chord, sideB]
+    #         #airfoil['d'] = np.interp(blade_r[i:i+2], self.blade_r, self.blade_chord)
+    #         airfoil['gamma'] = np.interp(blade_r[i], self.blade_r, self.blade_theta)
+    #         airfoil['potMod'] = False
+
+    #         airfoil['Cd'] = 0.0
+    #         if 'added_mass_coeff' in self.turbine["airfoils"][airfoil_name_dict.index(af)]:
+    #             added_mass_coeff = self.turbine["airfoils"][airfoil_name_dict.index(af)]['added_mass_coeff']
+    #         else:
+    #             added_mass_coeff = [Ca_edge, Ca_flap]
+    #         airfoil['Ca'] = added_mass_coeff 
+    #         #airfoil['Ca'] = self.turbine["airfoils"][airfoil_name_dict.index(af)]["added_mass_coeff"]
+    #         airfoil['CdEnd'] = 0.0
+    #         airfoil['CaEnd'] = 0.0
+        
+    #         airfoil['t'] = 0.01
+    #         airfoil['rho_shell'] = 1850
+
+    #         self.bladeMemberList.append(Member(airfoil, len(self.w)))
+    
 
     def bladeGeometry2Member(self):
         '''Second iteration of a function to create RAFT members based on rotor blades (is currently used).
@@ -1233,7 +1287,8 @@ if __name__=='__main__':
     # transfer some dictionary contents that would normally be done higher up in RAFT
     design['turbine']['rho_air' ] = design['site']['rho_air']
     design['turbine']['mu_air'  ] = design['site']['mu_air']
-    design['turbine']['shearExp'] = design['site']['shearExp']
+    design['turbine']['shearExp_air'] = design['site']['shearExp']
+    design['turbine']['shearExp_water'] = design['site']['shearExp']
     
     # zero the nacelle velocity feedback gain since there seems to be a discrepancy with its definition
     design['turbine']['pitch_control']['Fl_Kp'] = 0.0
@@ -1243,7 +1298,7 @@ if __name__=='__main__':
     ws = np.arange(0.01,6.0,0.01) # frequencies (rad/s)
 
     # make Rotor object
-    rotor = Rotor(design['turbine'], ws)    
+    rotor = Rotor(design['turbine'], ws, 0)    
     
     
     
@@ -1278,8 +1333,8 @@ if __name__=='__main__':
 
         rgba = cmapper((i_case+1)/8)
 
-        ax[0,0].plot(ws/2.0/np.pi, a_aero              , color=rgba, label=f"U = {UU[i_case]:2.0f} m/s")
-        ax[1,0].plot(ws/2.0/np.pi, b_aero              , color=rgba, label=f"U = {UU[i_case]:2.0f} m/s")
+        ax[0,0].plot(ws/2.0/np.pi, a_aero[4, 4, :]     , color=rgba, label=f"U = {UU[i_case]:2.0f} m/s")
+        ax[1,0].plot(ws/2.0/np.pi, b_aero[4, 4, :]     , color=rgba, label=f"U = {UU[i_case]:2.0f} m/s")
         ax[0,1].plot(ws/2.0/np.pi, np.real(rotor.c_exc), color=rgba)
         ax[0,1].plot(ws/2.0/np.pi, np.imag(rotor.c_exc), color=rgba, ls=":") 
         ax[1,1].plot(ws/2.0/np.pi, rotor.V_w           , color=rgba, label=f"U = {UU[i_case]:2.0f} m/s")

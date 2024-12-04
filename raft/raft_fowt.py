@@ -315,7 +315,7 @@ class FOWT():
 
         # initialize some variables for running totals
         VTOT = 0.                   # Total underwater volume of all members combined
-        m_all = 0.                   # Total mass of all members [kg]
+        m_all = 0.                  # Total mass of all members [kg]
         AWP_TOT = 0.                # Total waterplane area of all members [m^2]
         IWPx_TOT = 0                # Total waterplane moment of inertia of all members about x axis [m^4]
         IWPy_TOT = 0                # Total waterplane moment of inertia of all members about y axis [m^4]
@@ -563,6 +563,11 @@ class FOWT():
         self.props['Ixx_sub'] = M_sub[3,3]  # principale moments of inertia of substructure
         self.props['Iyy_sub'] = M_sub[4,4]
         self.props['Izz_sub'] = M_sub[5,5]
+        self.props['Cz_hydro']  = self.C_hydro[2,2]
+        self.props['Cxx_hydro'] = self.C_hydro[3,3]
+        self.props['Cyy_hydro'] = self.C_hydro[4,4]
+        self.props['IyWP']      = IWPy_TOT
+        self.props['IxWP']      = IWPx_TOT
 
 
     def calcBEM(self, dw=0, wMax=0, wInf=10.0, dz=0, da=0, headings=[0], meshDir=os.path.join(os.getcwd(),'BEM')):
@@ -2142,6 +2147,110 @@ class FOWT():
 
         # in future should consider ability to animate mode shapes and also to animate response at each frequency
         # including hydro excitation vectors stored in each member
+
+    # def tmp_plot(self, ax, color=None, nodes=0, plot_rotor=True, station_plot=[], 
+    #              airfoils=False, zorder=2, plot_fowt=True, plot_ms=True,
+    #              shadow=True, mp_args={}): 
+    #     R = rotationMatrix(self.r6[3], self.r6[4], self.r6[5])  # note: eventually Rotor could handle orientation internally <<<
+    #     if plot_ms:
+    #         if self.ms:
+    #             self.ms.plot(ax=ax, color=color, shadow=shadow)
+    #     if color==None:
+    #         color='k'
+    #     else:
+    #         mp_args.update(dict(color=color))
+    #     #if self.ms:
+    #         #self.ms.plot(ax=ax, **mp_args)
+    #     if plot_fowt:
+    #         if plot_rotor:
+    #             for rotor in self.rotorList:
+    #                 rotor.plot(ax, color=color, airfoils=airfoils, zorder=zorder)
+    #         # loop through each member and plot it
+    #         for mem in self.memberList:
+    #             mem.setPosition()  # offsets/rotations could be done in this function rather than in mem.plot <<<
+    #             mem.plot(ax, r_ptfm=self.r6[:3], R_ptfm=R, color=color, 
+    #                     nodes=nodes, station_plot=station_plot, zorder=zorder)
+                
+
+    #     from raft.helpers import readCoordinate
+
+    #     file = "designs/airfoil/coordinate/DU21_A17.txt"
+    #     coord = readCoordinate(file)
+
+    #     r = 353.08/4
+    #     h = 50.0
+
+    #     x = coord[:, 1]*6.8 + r
+    #     y = (coord[:, 0]-0.25)*6.8
+    #     z = np.ones_like(x)*h
+
+    #     n_p = len(z)
+
+    #     r_ = np.stack((x,y,z), axis=-1)
+
+    #     R_tmp = [rotationMatrix(0,0,0), rotationMatrix(0,0,np.deg2rad(120)), rotationMatrix(0,0,np.deg2rad(240))]
+
+    #     tmp_bot = []
+    #     tmp_top = []
+
+    #     for i in range(3):
+
+    #         x = (np.matmul(R_tmp[i],r_.T))[0,:]
+    #         y = (np.matmul(R_tmp[i],r_.T))[1,:]
+    #         z = (np.matmul(R_tmp[i],r_.T))[2,:]
+
+    #         ax.plot(x,y,z, color='grey')
+
+    #         tmp_bot.append([x,y,z])
+
+        
+    #     x_ = coord[:, 1]*6.8 + r
+    #     y_ = (coord[:, 0]-0.25)*6.8
+    #     z_ = np.ones_like(x)*(152.8+50)
+
+    #     r_ = np.stack((x_,y_,z_), axis=-1)
+
+    #     R_tmp = [rotationMatrix(0,0,0), rotationMatrix(0,0,np.deg2rad(120)), rotationMatrix(0,0,np.deg2rad(240))]
+
+    #     for i in range(3):
+
+    #         x_ = (np.matmul(R_tmp[i],r_.T))[0,:]
+    #         y_ = (np.matmul(R_tmp[i],r_.T))[1,:]
+    #         z_ = (np.matmul(R_tmp[i],r_.T))[2,:]
+
+    #         ax.plot(x_,y_,z_, color='grey')
+
+    #         tmp_top.append([x_,y_,z_])
+
+    #     ax.plot([tmp_bot[0][0][0], tmp_top[0][0][0]], [tmp_bot[0][1][0], tmp_top[0][1][0]], [tmp_bot[0][2][0], tmp_top[0][2][0]], color='grey')
+    #     ax.plot([tmp_bot[0][0][n_p//2], tmp_top[0][0][n_p//2]], [tmp_bot[0][1][n_p//2], tmp_top[0][1][n_p//2]], [tmp_bot[0][2][n_p//2], tmp_top[0][2][n_p//2]], color='grey')
+
+    #     ax.plot([tmp_bot[1][0][0], tmp_top[1][0][0]], [tmp_bot[1][1][0], tmp_top[1][1][0]], [tmp_bot[1][2][0], tmp_top[1][2][0]], color='grey')
+    #     ax.plot([tmp_bot[1][0][n_p//2], tmp_top[1][0][n_p//2]], [tmp_bot[1][1][n_p//2], tmp_top[1][1][n_p//2]], [tmp_bot[1][2][n_p//2], tmp_top[1][2][n_p//2]], color='grey')
+
+    #     ax.plot([tmp_bot[2][0][0], tmp_top[2][0][0]], [tmp_bot[2][1][0], tmp_top[2][1][0]], [tmp_bot[2][2][0], tmp_top[2][2][0]], color='grey')
+    #     ax.plot([tmp_bot[2][0][n_p//2], tmp_top[2][0][n_p//2]], [tmp_bot[2][1][n_p//2], tmp_top[2][1][n_p//2]], [tmp_bot[2][2][n_p//2], tmp_top[1][2][n_p//2]], color='grey')
+
+
+
+
+    #     # r = 353.08/2
+    #     # h = 10.0
+    #     # theta = np.linspace(0, 2 * np.pi, 100)
+    #     # x = r * np.cos(theta)
+    #     # y = r * np.sin(theta)
+    #     # z = np.ones_like(x)*h
+    #     # ax.plot(x,y,z)
+
+    #     # h = 10.0
+    #     # theta = np.linspace(0, 2 * np.pi, 100)
+    #     # x = r * np.cos(theta)
+    #     # y = r * np.sin(theta)
+    #     # z = np.ones_like(x)*152.8
+    #     # ax.plot(x,y,z)
+        
+    #     # in future should consider ability to animate mode shapes and also to animate response at each frequency
+    #     # including hydro excitation vectors stored in each member
 
 
     def plot2d(self, ax, color=None, plot_rotor=1, 

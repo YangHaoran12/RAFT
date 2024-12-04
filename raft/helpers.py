@@ -1322,7 +1322,73 @@ def cleanRAFTdict(design):
     return newdesign
     
 
+def readPolar(file):
 
+    polar = np.loadtxt(file)
+
+    return polar
+
+def readCoordinate(file):
+
+    coord = np.loadtxt(file, skiprows=8)
+
+    return coord
+
+def getCone(r, precurve, precone):
+    n = len(r)
+
+    if np.all(precurve == 0):      
+        cone = np.ones(n) * precone
+
+    else:
+        x_az = -r*np.sin(precone) + precurve*np.cos(precone)
+        z_az = r*np.cos(precone) + precurve*np.sin(precone)
+        # y_az = presweep
+
+        cone = np.zeros(n)
+
+        cone[0] = np.arctan2(-(x_az[1] - x_az[0]), z_az[1] - z_az[0])
+        cone[-1] = np.arctan2(-(x_az[-1] - x_az[-2]), z_az[-1] - z_az[-2])
+        cone[1:-1] = 0.5*(np.arctan2(-(x_az[1:-1] - x_az[0:-2]), z_az[1:-1] - z_az[0:-2]) + np.arctan2(-(x_az[2:]- x_az[1:-1]), z_az[2:] - z_az[1:-1]))
+
+    return cone
+
+def getConeCubic(r, precurve, precone):
+    n = len(r)
+    from scipy.interpolate import CubicSpline
+
+    if np.all(precurve == 0):      
+        cone = np.ones(n) * precone
+
+    else:
+        x_az = -r*np.sin(precone) + precurve*np.cos(precone)
+        z_az = r*np.cos(precone) + precurve*np.sin(precone)
+        # y_az = presweep
+
+        spline = CubicSpline(z_az, -x_az)
+
+        cone = np.arctan(spline.derivative(1)(z_az))
+
+    return cone
+
+
+def inerpStr(x=np.ndarray, xp=np.ndarray, fp=list[str]):
+
+    f = []
+    for i in range(len(x)):
+        for j in range (len(xp)-1):
+
+            if x[i] >= xp[j] and x[i] < xp[j+1]:
+                f.append(fp[j])
+                break
+            
+            elif x[i] < xp[0]:
+                f.append(fp[0])
+                break
+            
+    f.append(fp[-1])
+    
+    return f
 
 if __name__ == '__main__':
     

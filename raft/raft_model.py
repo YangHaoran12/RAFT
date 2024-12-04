@@ -15,7 +15,7 @@ except:
     import pickle
     
 import moorpy as mp
-import raft.raft_fowt as fowt
+import raft.raft_fowt_yang as fowt
 from raft.helpers import *
 from moorpy.helpers import dsolve2, set_axes_equal, dsolvePlot
 import copy

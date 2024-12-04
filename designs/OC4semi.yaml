@@ -18,11 +18,14 @@ site:
 cases:
     keys : [wind_speed, wind_heading, turbulence, turbine_status, yaw_misalign, wave_spectrum, wave_period, wave_height, wave_heading  ]
     data :  #   m/s        deg    % or e.g. 2B_NTM    string            deg         string          (s)         (m)         (deg)
-        -  [    12,         0,            0.01,       operating,          0,        JONSWAP,         13.1,        8.5,           0        ]
+        # -  [    12,         0,            0.01,       operating,          0,        JONSWAP,         13.1,        8.5,           0        ]
+        # -  [    12,         30,            0.01,       operating,          0,        JONSWAP,         13.1,        8.5,           0        ]
+        -  [    12,         45,            0.01,       operating,          0,        JONSWAP,         13.1,        8.5,           0        ]
 
 
 turbine:
-       
+
+    nrotors       :          1
     mRNA          :     350000        #  [kg]       RNA mass 
     IxRNA         :   35444067        #  [kg-m2]    RNA moment of inertia about local x axis (assumed to be identical to rotor axis for now, as approx) [kg-m^2]
     IrRNA         :   26159984.0      #  [kg-m2]    RNA moment of inertia about local y or z axes [kg-m^2]
@@ -1063,7 +1066,9 @@ platform:
     min_freq_BEM : 0.03   #  [Hz]  lowest frequency and frequency interval to use in BEM analysis
     dz_BEM       : 3.0    #  [m]   axial discretization panel length target for BEM analysis
     da_BEM       : 2.0    #  [m]   azimuthal discretization panel length target for BEM analysis
-    potModMaster : 1
+    potModMaster : 3
+    potFirstOrder: 1
+    hydroPath    : 'BEM/OC4/platform'
     
     members:   # list all members here
         

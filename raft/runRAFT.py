@@ -45,7 +45,7 @@ def runRAFT(fname_design, fname_turbine, fname_env):
     
     # --- Create and run the model ---
 
-    model = raft.Model(design, w=w, depth=depth)  # set up model
+    model = raft.Model(design)  # set up model
     
     model.setEnv(Hs=8, Tp=12, V=10, Fthrust=float(design['turbine']['Fthrust']))  # set basic wave and wind info
 
