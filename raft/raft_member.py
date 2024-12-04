@@ -776,7 +776,7 @@ class Member:
                     I = np.diag([IxWP, IyWP])
                     T = np.array([[cosBeta, sinBeta], [-sinBeta, cosBeta]])    # 2D rotation matrix: R_z(-Beta)
                     
-                    I_rot = np.matmul(T.T, np.matmul(I, T))                    # area moment of inertia tensor
+                    I_rot = np.matmul(T, np.matmul(I, T.T))                    # I_rot = T*diag(IxWP', IyWP')*T.T
                     IxWP = I_rot[0,0]                                          # the transformation matrix to unrotate the member's local axes                     
                     IyWP = I_rot[1,1]                                          # area moment of inertia tensor where MoI axes are now in the same direction as PRP                     
                 elif self.shape=='rectangular':
@@ -789,7 +789,7 @@ class Member:
                     I = np.diag([IxWP, IyWP])                                  # area moment of inertia tensor
                     T = np.array([[cosBeta, sinBeta], [-sinBeta, cosBeta]])    # the transformation matrix to unrotate the member's local axes
                     
-                    I_rot = np.matmul(T.T, np.matmul(I,T))                     # area moment of inertia tensor where MoI axes are now in the same direction as PRP
+                    I_rot = np.matmul(T, np.matmul(I,T.T))                     # area moment of inertia tensor where MoI axes are now in the same direction as PRP
                     IxWP = I_rot[0,0]
                     IyWP = I_rot[1,1]
 
