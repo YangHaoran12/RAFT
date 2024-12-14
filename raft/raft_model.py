@@ -15,11 +15,13 @@ except:
     import pickle
     
 import moorpy as mp
-import raft.raft_fowt_yang as fowt
+from raft.raft_fowt import FOWT
 from raft.helpers import *
 from moorpy.helpers import dsolve2, set_axes_equal, dsolvePlot
 import copy
 #import F6T1RNA as structural    # import turbine structural model functions
+
+from typing import Iterable
 
 raft_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 TwoPi = 2.0*np.pi
@@ -37,7 +39,7 @@ class Model():
             could in future be used to set up any number of identical turbines
         '''
 
-        self.fowtList = []      # list of FOWT objects
+        self.fowtList:list[FOWT] = []      # list of FOWT objects
         self.coords = []        # list of FOWT reference coordinates in x and y (also stored inside each FOWT as x_ref, y_ref [m]
 
         self.nDOF = 0  # number of FOWT-level DOFs in the system - normally will be 6*len(fowtList)
@@ -134,7 +136,7 @@ class Model():
                     mpb = None
                 
                 
-                self.fowtList.append(fowt.FOWT(design_i, self.w, mpb, depth=self.depth,
+                self.fowtList.append(FOWT(design_i, self.w, mpb, depth=self.depth,
                                        x_ref=x_ref, y_ref=y_ref, heading_adjust=headj))
                                                
                 self.coords.append([x_ref, y_ref])
@@ -153,7 +155,7 @@ class Model():
             self.ms = None
 
             # set up the FOWT here
-            self.fowtList.append(fowt.FOWT(design, self.w, None, depth=self.depth))
+            self.fowtList.append(FOWT(design, self.w, None, depth=self.depth))
             self.coords.append([0.0,0.0])
             self.nDOF += 6
         
@@ -172,7 +174,7 @@ class Model():
         
 
 
-    def addFOWT(self, fowt, xy0=[0,0]):
+    def addFOWT(self, fowt:FOWT, xy0=[0,0]):
         '''(not used currently) Adds an already set up FOWT to the frequency domain model solver.'''
 
         self.fowtList.append(fowt)

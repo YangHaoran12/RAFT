@@ -2,7 +2,7 @@
 from ntpath import join
 import numpy as np
 import xarray as xr
-from raft.raft_member_yang import Member, TowerMember
+from raft.raft_member import Member, TowerMember
 from raft.raft_mesh import platformMesh, sPlatformMesh
 import os
 
@@ -468,7 +468,7 @@ class CapytaineSolver(BEMSolver):
             Fexc = self.dataset['excitation_force'].data[1:-1] # mannually remove nan in 0 and inf frequency 
 
         M = np.abs(Fexc)
-        P = np.angle(Fexc, deg=True)
+        P = np.angle(np.conj(Fexc), deg=True)
         R = np.real(Fexc)
         I = np.imag(Fexc)
 
@@ -939,11 +939,11 @@ def add_rotor(cls, body, faces_motion=None, axis=None, faces_colors=None, edges=
 if __name__ == "__main__":
 
     solver = BEMSolver(memList=None)
-    solver.getResultsFromWamit('BEM/VolturnUS-S', 'platform')
+    solver.getResultsFromWamit('BEM/OC4-semi-WAMIT', 'platform')
     solver.plotRadiationResults()
-    solver.plotFexcResults()
+    solver.plotFexcResults(nHeading=1)
     
-    solver = CapytaineSolver(memList=None, cog=[0,0,0], include0andinf=True, headings=[0, 30, 60], nw=81)
+    solver = CapytaineSolver(memList=None, cog=[0,0,0], include0andinf=True, headings=[0, 30, 60, 90, ], nw=81)
     solver.getCapytaineMeshFromFile("models/nemoh/OC4_3087.dat")
 
     solver.defineProblems()

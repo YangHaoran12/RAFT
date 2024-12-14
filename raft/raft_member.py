@@ -1,6 +1,7 @@
 # RAFT's support structure member class
 
 import numpy as np
+from numpy.core.multiarray import zeros as zeros
 
 from raft.helpers import *
 
@@ -64,7 +65,7 @@ class Member:
             self.rB0 = np.matmul(rotMat, self.rB0)
             
             if rAB[0] == 0.0 and rAB[1] == 0:  # special case of vertical member
-                self.gamma += heading  # heading must be applied as twist about z
+                self.gamma += heading  # heading must be applied as twist about zF
 
 
         # ----- process station positions and other distributed inputs -----
@@ -184,8 +185,8 @@ class Member:
         # start things off with the strip for end A
         ls     = [0.0]                 # list of lengths along member axis where a node is located <<< should these be midpoints instead of ends???
         dls    = [0.0]                 # lumped node lengths (end nodes have half the segment length)
-        ds     = [0.5*dorsl[0]]       # mean diameter or side length pair of each strip
-        drs    = [0.5*dorsl[0]]       # change in radius (or side half-length pair) over each strip (from node i-1 to node i)
+        ds     = [dorsl[0]]       # mean diameter or side length pair of each strip
+        drs    = [dorsl[0]]       # change in radius (or side half-length pair) over each strip (from node i-1 to node i)
 
         for i in range(1,n):
 
@@ -211,8 +212,8 @@ class Member:
         dlstrip = 0
         ls  += [self.stations[-1]]         
         dls += [0.0]
-        ds  += [0.5*dorsl[-1]]
-        drs += [-0.5*dorsl[-1]]
+        ds  += [dorsl[-1]]
+        drs += [dorsl[-1]]
         
         # >>> may want to have a way to not have an end strip for members that intersect things <<<
         
@@ -724,7 +725,7 @@ class Member:
 
 
 
-    def getHydrostatics(self, rPRP=np.zeros(3), rho=1025, g=9.81):
+    def getHydrostaticsOld(self, rPRP=np.zeros(3), rho=1025, g=9.81):
         '''Calculates member hydrostatic properties, namely buoyancy and stiffness matrix.
         Properties are calculated relative to the platform reference point (PRP) in the
         global orientation directions.
@@ -746,6 +747,8 @@ class Member:
         # these will only get changed once, if there is a portion crossing the water plane
         AWP = 0
         IWP = 0
+        IxWP = 0
+        IyWP = 0
         xWP = 0
         yWP = 0
 
@@ -832,8 +835,8 @@ class Member:
                 My = M*dPhi_dThy
 
                 Fvec[2] += Fz                           # vertical buoyancy force [N]
-                Fvec[3] += Mx + Fz*rA[1]                # moment about x axis [N-m]
-                Fvec[4] += My - Fz*rA[0]                # moment about y axis [N-m]
+                Fvec[3] += Mx + Fz*r_center[1]                # moment about x axis [N-m]
+                Fvec[4] += My - Fz*r_center[0]                # moment about y axis [N-m]
 
 
                 # normal approach to hydrostatic stiffness, using this temporarily until above fancier approach is verified
@@ -886,9 +889,9 @@ class Member:
         
         self.V = V_UW  # store submerged volume
         
-        return Fvec, Cmat, V_UW, r_center, AWP, IWP, xWP, yWP
+        return Fvec, Cmat, V_UW, r_center, AWP, IxWP + AWP*yWP**2, IyWP + AWP*xWP**2, xWP, yWP # return IxWP IyWP adding waterPlane momentum
 
-    def getHydrostaticsYang(self, rPRP=np.zeros(3), rho=1025, g=9.81):
+    def getHydrostatics(self, rPRP=np.zeros(3), rho=1025, g=9.81):
         '''Calculates member hydrostatic properties, namely buoyancy and stiffness matrix.
         Properties are calculated relative to the platform reference point (PRP) in the
         global orientation directions.
@@ -953,19 +956,18 @@ class Member:
                     IxWP = np.pi/64*dWP**4/cosPhi                                               
                     IyWP = np.pi/64*dWP**4/(cosPhi**3)       
                     I = np.diag([IxWP, IyWP])
-                    T = np.array([[cosBeta, -sinBeta], [sinBeta, cosBeta]])
-                    I_rot = np.matmul(T.T, np.matmul(I, T))                    # rotate in the opposite direction T*I*T.T turns tp T.T*I*T
+                    T = np.array([[cosBeta, sinBeta], [-sinBeta, cosBeta]])    # Rz(-Beta)
+                    I_rot = np.matmul(T, np.matmul(I, T.T))                    # rotate in the opposite direction T*I*T.T 
                     IxWP = I_rot[0,0]
                     IyWP = I_rot[1,1]                                                
                 elif self.shape=='rectangular':
                     slWP = intrp(0, rA[2], rB[2], self.sl[i-1], self.sl[i])    # side lengths of member where its axis crosses the waterplane [m]
-                    slWP[0] /= cosPhi
-                    AWP = slWP[0]*slWP[1]                                      # waterplane area of rectangular member [m^2]
-                    IxWP = (1/12)*slWP[0]*slWP[1]**3                           # waterplane MoI [m^4] about the member's LOCAL x-axis, not the global x-axis
-                    IyWP = (1/12)*slWP[0]**3*slWP[1]                           # waterplane MoI [m^4] about the member's LOCAL y-axis, not the global y-axis
+                    AWP = slWP[0]*slWP[1] / cosPhi                                     # waterplane area of rectangular member [m^2]
+                    IxWP = (1/12)*slWP[0]*slWP[1]**3 / cosPhi                          # waterplane MoI [m^4] about the member's LOCAL x-axis, not the global x-axis
+                    IyWP = (1/12)*slWP[0]**3*slWP[1] / (cosPhi**3)                          # waterplane MoI [m^4] about the member's LOCAL y-axis, not the global y-axis
                     I = np.diag([IxWP, IyWP])
-                    T = np.array([[cosBeta, -sinBeta], [sinBeta, cosBeta]])
-                    I_rot = np.matmul(T.T, np.matmul(I, T))
+                    T = np.array([[cosBeta, sinBeta], [-sinBeta, cosBeta]])
+                    I_rot = np.matmul(T, np.matmul(I, T.T))
                     IxWP = I_rot[0,0]
                     IyWP = I_rot[1,1]
 
@@ -990,7 +992,7 @@ class Member:
                 # derivatives from global to local
                 dPhi_dThx  = -sinBeta                     # \frac{d\phi}{d\theta_x} = \sin\beta
                 dPhi_dThy  =  cosBeta
-                dFz_dz   = -rho*g*AWP /cosPhi
+                dFz_dz   = -rho*g*AWP
 
                 # note: below calculations are based on untapered case, but
                 # temporarily approximated for taper by using dWP (diameter at water plane crossing) <<< this is rough
@@ -1004,8 +1006,8 @@ class Member:
                 My = M*dPhi_dThy
 
                 Fvec[2] += Fz                           # vertical buoyancy force [N]
-                Fvec[3] += Mx + Fz*rA[1]                # moment about x axis [N-m]
-                Fvec[4] += My - Fz*rA[0]                # moment about y axis [N-m]
+                Fvec[3] += Mx + Fz*r_center[1]                # moment about x axis [N-m]
+                Fvec[4] += My - Fz*r_center[0]                # moment about y axis [N-m]
 
 
                 # normal approach to hydrostatic stiffness, using this temporarily until above fancier approach is verified
@@ -1058,8 +1060,61 @@ class Member:
         
         self.V = V_UW  # store submerged volume
         
-        return Fvec, Cmat, V_UW, r_center, AWP, IWP, xWP, yWP, IxWP, IyWP
+        return Fvec, Cmat, V_UW, r_center, AWP, IxWP + AWP*yWP**2, IyWP + AWP*xWP**2, xWP, yWP # return IxWP IyWP adding waterPlane momentum
 
+    def getHydrostaticsFromMesh(self, rPRP=np.zeros(3), rho=1025, g=9.81):
+        '''Calculates member hydrostatic properties, namely buoyancy and stiffness matrix.
+        Properties are calculated relative to the platform reference point (PRP) in the
+        global orientation directions.
+        
+        Parameters
+        ----------
+        rPRP : float array
+            Coordinates of the platform reference point (the first three entries of fowt.Xi0),
+            which the moment of inertia matrix will be calculated relative to. [m]
+        '''
+        Fvec = np.zeros(6)              # this will get added to by each segment of the member
+        Cmat = np.zeros([6,6])          # this will get added to by each segment of the member
+        V_UW = 0                        # this will get added to by each segment of the member
+        # these will only get changed once, if there is a portion crossing the water plane
+        AWP = 0
+        IxWP = 0
+        IyWP = 0
+        xWP = 0
+        yWP = 0
+        r_center = 0
+
+        from raft.raft_mesh import MemberMesh
+
+        mem_mesh = MemberMesh(self, sizeMax=0.1*np.min(self.d) if self.shape=='circular' else 0.1*np.min(self.sl))
+        # mem_mesh.show()
+
+        if self.rA[2]*self.rB[2] <= 0:    # if member crosses (or touches) water plane
+           
+            return mem_mesh.getHydrostatics(rPRP)
+       
+        elif self.rA[2] <= 0 and self.rB[2] <= 0:
+
+            # Fvec = np.zeros(6)
+            # Cmat = np.zeros([6,6])
+
+            mass, cog = mem_mesh.getMass(rho)
+
+            V_UW = mass/rho
+
+            r_center = cog - rPRP
+
+            Fvec += translateForce3to6DOF(np.array([0, 0, mass*g]), r_center)
+            
+            Cmat[3,3] += mass*g * r_center[2]
+            Cmat[4,4] += mass*g * r_center[2]
+
+        else:
+
+            pass
+
+        return Fvec, Cmat, V_UW, r_center, AWP, IxWP, IyWP, xWP, yWP
+           
     def calcHydroConstants(self, r_ref=np.zeros(3), sum_inertia=False, rho=1025, g=9.81, k_array=None):
         '''Compute the Member's linear strip-theory-hydrodynamics terms, 
         related to drag and added mass, which are also a precursor to 
@@ -1459,8 +1514,8 @@ class Member:
             for x,y in zip([1,-1,-1,1,1], [1,1,-1,-1,1]):
 
                 for j in m:
-                    X.append(0.5*self.sl[j,1]*x)
-                    Y.append(0.5*self.sl[j,0]*y)
+                    X.append(0.5*self.sl[j,0]*x)
+                    Y.append(0.5*self.sl[j,1]*y)
                     Z.append(self.stations[j])
 
             coords = np.vstack([X, Y, Z])
@@ -1644,6 +1699,7 @@ class Member:
             ax.set_ylabel('Y axis')
             ax.set_zlabel('Z axis')
             plt.axis('equal') 
+        
 
 
     def plotSurfaceStations(self, ax, r_ptfm=[0,0,0], R_ptfm=[], color='k', nodes=0, 
@@ -1789,3 +1845,411 @@ class TowerMember(Member):
 
     def __init__(self, mi, nw, BEM=[], heading=0):
         super().__init__(mi, nw, BEM, heading)
+
+        self.stripMass = np.zeros(self.ns)
+        
+        self.F_aero  = np.zeros((self.ns, 3)) # aero loads act on the center of each strip
+        self.F_struc = np.zeros((self.ns, 6)) # all structural loads act on the center of each strip(F_rotor + F_aero + F_mass)
+
+        ts = [self.t[0]]
+
+        dlsMax = getFromDict(mi, 'dlsMax', shape=1, default=5)
+        
+        for i in range(1,len(self.stations)):
+
+            lstrip = self.stations[i]-self.stations[i-1]             # the axial length of the strip
+
+            if lstrip > 0.0:
+                ns = int(np.ceil( (lstrip) / dlsMax ))             # number of strips to split this segment into
+                dlstrip = lstrip/ns
+                m = (self.t[i] - self.t[i-1])/lstrip          # taper thicness ratio of the current strip @Yang
+                ts += [self.t[i-1] + m*dlstrip*(0.5+j) for j in range(ns)] # add node locations
+                
+            elif lstrip == 0.0:                                      # flat plate case (ends, and any flat transitions), a single strip for this section
+                ts += [0.5*(self.t[i-1] + self.t[i])]    
+
+        # finish things off with the strip for end B
+        ts += [self.t[-1]]
+        
+        self.ts  = np.array(ts)                                 
+
+
+    def getInertia(self, rPRP=np.zeros(3)):
+
+        if self.shape == 'circular' or self.shape == 'rectangular':
+            return super().getInertia(rPRP)
+        
+        elif self.shape == 'ellipse': # Only valid for a tower member
+            from raft.helpers import EllipticalFrustumVCV, EllipticalFrustumMOI
+            # ------- member inertial calculations ---------
+
+            mass_center = 0                                 # total sum of mass the center of mass of the member [kg-m]
+            mshell = 0                                      # total mass of the shell material only of the member [kg]s
+            self.M_struc = np.zeros([6,6])                  # member mass/inertia matrix [kg, kg-m, kg-m^2]
+
+            # loop through each sub-member
+            for i in range(1,len(self.stations)):                            # start at 1 rather than 0 because we're looking at the sections (from station i-1 to i)
+
+                # initialize common variables
+                l = self.stations[i]-self.stations[i-1]     # length of the submember [m]
+                rho_shell = self.rho_shell
+
+                # MASS AND CENTER OF GRAVITY
+                dA = self.sl[i-1]                        # outer diameter of the lower node [m]
+                dB = self.sl[i]                          # outer diameter of the upper node [m]
+                dAi = self.sl[i-1] - 2*self.t[i-1]       # inner diameter of the lower node [m]
+                dBi = self.sl[i] - 2*self.t[i]           # inner diameter of the upper node [m]
+
+                V_outer, hco = EllipticalFrustumVCV(dA, dB, l)    # volume and center of volume of solid frustum with outer diameters [m^3] [m]
+                V_inner, hci = EllipticalFrustumVCV(dAi, dBi, l)  # volume and center of volume of solid frustum with inner diameters [m^3] [m] 
+                v_shell = V_outer-V_inner               # volume of hollow frustum with shell thickness [m^3]
+                m_shell = v_shell*rho_shell             # mass of hollow frustum [kg]
+
+                hc_shell = ((hco*V_outer)-(hci*V_inner))/(V_outer-V_inner)  # center of volume of hollow frustum with shell thickness [m]
+
+                mass = m_shell
+                hc = hc_shell       # total center of mass of the submember from the submember's rA location [m]
+                    
+                    
+                # MOMENT OF INERTIA
+                Ixx_end_outer, Iyy_end_outer, Izz_end_outer = EllipticalFrustumMOI(dA, dB, l, rho_shell)          # radial and axial MoI about the end of the solid outer frustum [kg-m^2]
+                Ixx_end_inner, Iyy_end_inner, Izz_end_inner = EllipticalFrustumMOI(dAi, dBi, l, rho_shell)        # radial and axial MoI about the end of the imaginary solid inner frustum [kg-m^2]
+                
+                Ixx_end_shell = Ixx_end_outer - Ixx_end_inner
+                Iyy_end_shell = Iyy_end_outer - Iyy_end_inner
+                Izz_end_shell = Izz_end_outer - Izz_end_inner
+                                
+                Ixx_end = Ixx_end_shell
+                Ixx = Ixx_end - mass*hc**2
+                Iyy_end = Iyy_end_shell
+                Iyy = Iyy_end - mass*hc**2    
+                Izz_end = Izz_end_shell
+                Izz = Izz_end 
+
+                # center of mass of the submember from the PRP in global orientation (note: some of above could streamlined out of the if/else)
+                center = self.rA + self.q*(self.stations[i-1] + hc) - rPRP      # center of mass of the submember relative to the PRP [m]
+
+                # add/append terms
+                mass_center += mass*center                  # total sum of mass the center of mass of the member [kg-m]
+                mshell += m_shell                           # total mass of the shell material only of the member [kg]
+
+                # create a local submember mass matrix
+                Mmat = np.diag([mass, mass, mass, 0, 0, 0]) # submember's mass matrix without MoI tensor
+                # create the local submember MoI tensor in the correct directions
+                I = np.diag([Ixx, Iyy, Izz])                # MoI matrix about the member's local CG. 0's on off diagonals because of symmetry
+                T = self.R.T                                # transformation matrix to unrotate the member's local axes. Transposed because rotating axes.
+                I_rot = np.matmul(T.T, np.matmul(I,T))      # MoI about the member's local CG with axes in same direction as global axes. [I'] = [T][I][T]^T -> [T]^T[I'][T] = [I]
+
+                Mmat[3:,3:] = I_rot     # mass and inertia matrix about the submember's CG in unrotated, but translated local frame
+
+                # translate this submember's local inertia matrix to the PRP and add it to the total member's M_struc matrix
+                self.M_struc += translateMatrix6to6DOF(Mmat, center) # mass matrix of the member about the PRP
+
+            mass = self.M_struc[0,0]        # total mass of the entire member [kg]
+            center = mass_center/mass       # total center of mass of the entire member from the PRP [m]
+        
+            self.mass = mass
+            self.center = center
+
+            return mass, center, mshell, 0, 0
+            
+    
+    def getInertiaGmsh(self, rPRP=np.zeros(3)):
+        
+        if self.shape == 'circular' or self.shape == 'rectangular':
+            return super().getInertia(rPRP)
+
+        elif self.shape == 'ellipse': # Only valid for a tower member
+            import gmsh
+            gmsh.initialize()
+
+            self.M_struc = np.zeros([6,6])                  # member mass/inertia matrix [kg, kg-m, kg-m^2]
+
+            for i in range(1, len(self.stations)):
+                if self.stations[i] == self.stations[i-1]:
+                    pass
+
+            else:
+
+                r0 = self.rA+self.q*self.stations[i-1]
+                r1 = self.rA+self.q*self.stations[i]
+
+                gmsh.model.occ.addDisk(xc=r0[0], yc=r0[1], zc=r0[2], rx=self.sl[0,0]/2, ry=self.sl[0,1]/2, tag=1, zAxis=self.q)
+                
+                gmsh.model.occ.addDisk(xc=r1[0], yc=r1[1], zc=r1[2], rx=self.sl[1,0]/2, ry=self.sl[1,1]/2, tag=2, zAxis=self.q)
+
+                gmsh.model.occ.addThruSections([1, 2], makeSolid=False)
+                gmsh.model.occ.remove([(2,1), (2,2)])
+
+                mass           = gmsh.model.occ.getMass(2, 3) * self.rho_shell * self.t[i]
+                cog            = gmsh.model.occ.get_center_of_mass(2,3) - rPRP
+                inertia_matrix = gmsh.model.occ.get_matrix_of_inertia(2,3).reshape((3,3)) * self.rho_shell * self.t[i]
+
+                gmsh.finalize()
+
+                Mmat = np.block([[np.eye(3)*mass, np.zeros((3,3))],[np.zeros((3,3)), inertia_matrix]])
+                self.M_struc += translateMatrix6to6DOF(Mmat, cog)
+
+                return mass, cog, mass, 0, 0
+            
+    
+    def getStripStructForce(self, g):
+        '''Calculates mass of each strip to evaluate shear force and bending moment of tower member
+        
+        Parameters
+        ----------
+        rSPRP : float array
+            Coordinates of the structural(tower) reference point,
+            which the moment of inertia matrix will be calculated relative to. [m]
+        '''
+        # ------- member inertial calculations ---------
+        
+        mass_center_s = np.zeros((self.ns, 3))                         # mass center of each strip
+        mass_s = np.zeros(self.ns)                                      # mass of each strip
+
+        # loop through each sub-member
+        for i in range(1, self.ns):                            # start at 1 rather than 0 because we're looking at the sections (from station i-1 to i)
+
+            # initialize common variables
+            l = self.ls[i]-self.ls[i-1]     # length of the submember [m]
+
+            # if the following variables are input as scalars, keep them that way, if they're vectors, take the [i-1]th value
+            rho_shell = self.rho_shell              # density of the shell material [kg/m^3]
+                
+            if self.shape=='circular':
+                # MASS AND CENTER OF GRAVITY
+                dA = self.ds[i-1]                        # outer diameter of the lower node [m]
+                dB = self.ds[i]                          # outer diameter of the upper node [m]
+                dAi = self.ds[i-1] - 2*self.ts[i-1]       # inner diameter of the lower node [m]
+                dBi = self.ds[i] - 2*self.ts[i]           # inner diameter of the upper node [m]
+                
+                V_outer, hco = FrustumVCV(dA, dB, l)    # volume and center of volume of solid frustum with outer diameters [m^3] [m]
+                V_inner, hci = FrustumVCV(dAi, dBi, l)  # volume and center of volume of solid frustum with inner diameters [m^3] [m] 
+                v_shell = V_outer-V_inner               # volume of hollow frustum with shell thickness [m^3]
+                m_shell = v_shell*rho_shell             # mass of hollow frustum [kg]
+                
+                hc_shell = ((hco*V_outer)-(hci*V_inner))/(V_outer-V_inner)  # center of volume of hollow frustum with shell thickness [m]
+                
+                mass_s[i] = m_shell                                  # total mass of the submember [kg]
+                mass_center_s[i] = self.r[i-1] + self.q*hc_shell       # total center of mass of the submember from the submember's rA location [m]
+                    
+            if self.shape == 'ellipse':
+                # MASS AND CENTER OF GRAVITY
+                dA = self.ds[i-1]                        # outer diameter of the lower node [m]
+                dB = self.ds[i]                          # outer diameter of the upper node [m]
+                dAi = self.ds[i-1] - 2*self.ts[i-1]       # inner diameter of the lower node [m]
+                dBi = self.ds[i] - 2*self.ts[i]           # inner diameter of the upper node [m]
+                
+                from raft.helpers import EllipticalFrustumVCV
+                V_outer, hco = EllipticalFrustumVCV(dA, dB, l)    # volume and center of volume of solid frustum with outer diameters [m^3] [m]
+                V_inner, hci = EllipticalFrustumVCV(dAi, dBi, l)  # volume and center of volume of solid frustum with inner diameters [m^3] [m] 
+                v_shell = V_outer-V_inner               # volume of hollow frustum with shell thickness [m^3]
+                m_shell = v_shell*rho_shell             # mass of hollow frustum [kg]
+                
+                hc_shell = ((hco*V_outer)-(hci*V_inner))/(V_outer-V_inner)  # center of volume of hollow frustum with shell thickness [m]
+                
+                mass_s[i] = m_shell                                  # total mass of the submember [kg]
+                mass_center_s[i] = self.r[i-1] + self.q*hc_shell       # total center of mass of the submember from the submember's rA location [m]
+
+        
+        for j in range(0, self.ns):
+
+            F_tmp = 0
+
+            for (mass, cog) in zip(mass_s[j+1:], mass_center_s[j+1:, :]):
+                
+                F_tmp += translateForce3to6DOF(np.array([0,0,-mass*g]), cog-self.r[j])
+
+            self.F_struc[j] = F_tmp
+
+
+class BladeMember(Member):
+
+    def __init__(self, mi, nw, BEM=[], heading=0):
+        super().__init__(mi, nw, BEM, heading)
+
+        self.rSectionA = mi['rSectionA']
+        self.rSectionB = mi['rSectionB']
+
+        
+
+        # self.setPosition()
+        # self.getHydrostatics()
+        # self.calcHydroConstants()
+
+        # a = 1
+
+    def setPosition(self, azimuth, r3=np.zeros(3)):
+        '''Calculates member pose -- node positions and vectors q, p1, and p2 
+        as well as member orientation matrix R based on the end positions and 
+        twist angle gamma along with any mean displacements and rotations.
+        
+        Parameters
+        ----------
+        r3 : array, optional
+            Absolute position of hub to which Blademember is located.
+        azimuth: float [deg]
+            Azimuth of rotor w.r.t. initial azimuth angle rotor.azimuth[0,1,2]
+        '''
+        # formerly calcOrientation
+        rSectionA_rel_hub = self.rSectionA - r3
+        rSectionB_rel_hub = self.rSectionB - r3
+
+        rAB = self.rB0-self.rA0                                     # vector from end A to end B, undisplaced [m]
+        q = rAB/np.linalg.norm(rAB)                                 # member axial unit vector
+
+        beta = np.arctan2(q[1],q[0])                                # member incline heading from x axis
+        phi  = np.arctan2(np.sqrt(q[0]**2 + q[1]**2), q[2])         # member incline angle from vertical
+
+        # trig terms for Euler angles rotation based on beta, phi, and gamma
+        s1 = np.sin(beta)
+        c1 = np.cos(beta)
+        s2 = np.sin(phi)
+        c2 = np.cos(phi)
+        s3 = np.sin(np.deg2rad(self.gamma))
+        c3 = np.cos(np.deg2rad(self.gamma))
+
+        R = np.array([[ c1*c2*c3-s1*s3, -c3*s1-c1*c2*s3,  c1*s2],
+                      [ c1*s3+c2*c3*s1,  c1*c3-c2*s1*s3,  s1*s2],
+                      [   -c3*s2      ,      s2*s3     ,    c2 ]])  #Z1Y2Z3 from https://en.wikipedia.org/wiki/Euler_angles#Rotation_matrix
+
+        p1 = np.matmul( R, [1,0,0] )               # unit vector that is in the 'beta' plane if gamma is zero
+        p2 = np.cross( q, p1 )                     # unit vector orthogonal to both p1 and q
+        
+        # apply any platform offset and rotation to the values already obtained
+        R_azimuth = rotationMatrix(np.deg2rad(azimuth),0,0)  # rotation matrix for the platform roll, pitch, yaw
+
+        self.rSectionA = (np.matmul(R_azimuth, rSectionA_rel_hub.T) + r3).T
+        self.rSectionB = (np.matmul(R_azimuth, rSectionB_rel_hub.T) + r3).T
+
+        R  = np.matmul(R_azimuth, R)
+        q  = np.matmul(R_azimuth, q)
+        p1 = np.matmul(R_azimuth, p1)
+        p2 = np.matmul(R_azimuth, p2)
+        
+        self.rA = np.matmul(R_azimuth, self.rA0-r3) + r3
+        self.rB = np.matmul(R_azimuth, self.rB0-r3) + r3
+               
+        # update node positions
+        rAB = self.rB - self.rA
+        for i in range(self.ns):
+            self.r[i,:] = self.rA + (self.ls[i]/self.l)*rAB              # locations of hydrodynamics nodes (will later be displaced) [m]
+
+        # save direction vectors and matrices
+        self.R  = R
+        self.q  = q
+        self.p1 = p1
+        self.p2 = p2
+
+        # matrices of vector multiplied by vector transposed, used in computing force components
+        self.qMat  = VecVecTrans(self.q)
+        self.p1Mat = VecVecTrans(self.p1)
+        self.p2Mat = VecVecTrans(self.p2) 
+
+    def getGeoPropertyGmsh(self, constraint=0.1):
+
+        import gmsh
+        gmsh.initialize()
+
+        curv = []
+        ptsA = []
+        ptsB = []
+
+        for p in self.rSectionA:
+
+            ptsA.append(gmsh.model.occ.addPoint(p[0], p[1], p[2], np.min(self.sl[0, 0])*constraint))
+            
+        ptsA.append(ptsA[0])
+        
+        for p in self.rSectionB:
+
+            ptsB.append(gmsh.model.occ.addPoint(p[0], p[1], p[2], np.min(self.sl[1, 0])*constraint))
+        
+        ptsB.append(ptsB[0])
+        
+        gmsh.model.occ.addBSpline(ptsA, 1)
+        gmsh.model.occ.addBSpline(ptsB, 2)
+
+        gmsh.model.occ.addCurveLoop([1], 1)
+        gmsh.model.occ.addCurveLoop([2], 2)
+
+        gmsh.model.occ.addThruSections([1, 2], 1, maxDegree=2)
+        gmsh.model.occ.synchronize()
+
+        V = gmsh.model.occ.getMass(3, 1)
+        cob    = gmsh.model.occ.get_center_of_mass(3, 1)
+
+        return V, cob
+        # gmsh.fltk.run()
+
+    def getHydrostatics(self, rPRP=np.zeros(3), rho=1025, g=9.81):
+        '''Calculates member hydrostatic properties, namely buoyancy and stiffness matrix.
+        Properties are calculated relative to the platform reference point (PRP) in the
+        global orientation directions.
+        
+        Parameters
+        ----------
+        rPRP : float array
+            Coordinates of the platform reference point (the first three entries of fowt.Xi0),
+            which the moment of inertia matrix will be calculated relative to. [m]
+        '''
+    
+        pi = np.pi
+
+        # initialize some values that will be returned
+        Fvec = np.zeros(6)              # this will get added to by each segment of the member
+        Cmat = np.zeros([6,6])          # this will get added to by each segment of the member
+        V_UW = 0                        # this will get added to by each segment of the member
+        r_centerV = np.zeros(3)         # center of buoyancy times volumen total - will get added to by each segment
+        # these will only get changed once, if there is a portion crossing the water plane
+        AWP = 0
+        IWP = 0
+        xWP = 0
+        yWP = 0
+
+
+        # loop through each member segment, and treat each segment like how we used to treat each member
+        n = len(self.stations)
+
+        for i in range(1,n):     # starting at 1 rather than 0 because we're looking at the sections (from station i-1 to i)
+
+            # calculate end locations for this segment relative to the point on 
+            # the waterplane directly above the PRP in unrotated directions (rHS_ref)
+            rHS_ref = np.array([rPRP[0], rPRP[1], 0])
+            rA = self.rA + self.q*self.stations[i-1] - rHS_ref
+            rB = self.rA + self.q*self.stations[i  ] - rHS_ref
+
+            # partially submerged case
+            if rA[2]*rB[2] <= 0:    # Not considering a BladeMember cross water plane
+                
+                raise ValueError('A BladeMember should be fully submerged')
+
+            # fully submerged case
+            elif rA[2] <= 0 and rB[2] <= 0:
+
+                # displaced volume [m^3] and distance along axis from end A to center of buoyancy of member [m]
+
+                V_UWi, r_center = self.getGeoPropertyGmsh()
+
+                # buoyancy force (and moment) vector
+                Fvec += translateForce3to6DOF(np.array([0, 0, rho*g*V_UWi]), r_center) # 6 DOF force/moment relavent to np.array([rPRP[0], rPRP[1], 0])
+
+                # hydrostatic stiffness matrix (about end A)
+                Cmat[3,3] += rho*g*V_UWi * r_center[2]
+                Cmat[4,4] += rho*g*V_UWi * r_center[2]
+
+                V_UW += V_UWi
+                r_centerV += r_center*V_UWi
+
+            else: # if the members are fully above the surface
+
+                pass
+
+        if V_UW > 0:
+            r_center = r_centerV/V_UW    # calculate overall member center of buoyancy
+        else:
+            r_center = np.zeros(3)       # temporary fix for out-of-water members
+        
+        self.V = V_UW  # store submerged volume
+        
+        return Fvec, Cmat, V_UW, r_center, 0, 0, 0, 0, 0

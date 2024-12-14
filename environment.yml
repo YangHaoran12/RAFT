@@ -17,3 +17,7 @@ dependencies:
   - scipy
   - setuptools
   - wisdem>=3.16
+  - capytaine
+  - gmsh
+  - pip:
+    - https://github.com/LHEEA/meshmagick/archive/master.zip

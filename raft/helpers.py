@@ -61,6 +61,100 @@ def FrustumVCV(dA, dB, H, rtn=0):
         return V
     elif rtn==2:
         return hc
+    
+def EllipticalFrustumVCV(dA, dB, H):
+    '''returns the volume and center of volume of a frustum, which can be a cylinder (box), cone (pyramid), or anything in between
+    Source'''
+
+    if np.sum(dA)==0:
+        V = 0
+        hc = 0
+    else:
+        a = dA[0]/2
+        b = dA[1]/2
+
+        da = (dB[0]-dA[0])/2/H # linear
+        db = (dB[1]-dA[1])/2/H # linear
+        
+        V = np.pi*(a*b*H + a*db*H**2/2 + b*da*H**2/2 + da*db*H**3/3)
+
+        hc = np.pi*(a*b*H**2/2 + a*db*H**3/3 + b*da*H**3/3 + da*db*H**4/4) / V
+
+    return V, hc
+
+
+def EllipticalFrustumMOI(dA, dB, H, rho):
+    '''returns the radial and axial moments of inertia of a potentially tapered circular member about the end node.
+    Previously used equations found in a HydroDyn paper, now it uses newly derived ones. Ask Stein for reference if needed'''
+    if H==0:        # if there's no height, mainly refering to no ballast, there shouldn't be any extra MoI
+        I_xx = 0
+        I_yy = 0                                                  # radial MoI about end node [kg-m^2]
+        I_zz = 0                                                    # axial MoI about axial axis [kg-m^2]
+    else:
+        import numpy as np
+        from scipy.integrate import tplquad
+
+        a0 = dA[0]/2  # semi-major axis of the begin
+        b0 = dA[1]/2  # semi-minor axis of the begin
+        a1 = dB[0]/2  # semi-major axis of the end
+        b1 = dB[1]/2  # semi-minor axis of the end
+
+        # definition of r(\thate)
+        def r_theta(a0, b0, a1, b1, H, z, theta):
+            # a(z) and b(z) is changing as z increasing
+            a_z = a0 + (a1 - a0) * z / H  # a(z)
+            b_z = b0 + (b1 - b0) * z / H  # b(z)
+            return (a_z * b_z) / np.sqrt(b_z**2 * np.cos(theta)**2 + a_z**2 * np.sin(theta)**2)
+
+        # I_xx
+        def integrandI_xx(r, theta, z, a0, b0, a1, b1, H):
+            return (r**2 * np.sin(theta)**2 + z**2) * r
+        
+        # I_yy
+        def integrandI_yy(r, theta, z, a0, b0, a1, b1, H):
+            return (r**2 * np.cos(theta)**2 + z**2) * r
+        
+        # I_zz
+        def integrandI_zz(r, theta, z, a0, b0, a1, b1, H):
+            return r**3
+
+        # 三重积分的积分顺序是 r, theta, z
+        def triple_integral(func, a0, b0, a1, b1, H):
+            # 使用 tplquad 进行三重积分
+            result, error = tplquad(
+                lambda r, theta, z: func(r, theta, z, a0, b0, a1, b1, H),
+                0, H,  # z 从 0 到 H
+                lambda z: 0,  # θ 的下限是 0
+                lambda z: 2 * np.pi,  # θ 的上限是 2π
+                lambda z, theta: 0,  # r 的下限是 0
+                lambda z, theta: r_theta(a0, b0, a1, b1, H, z, theta)  # r 的上限是 r(θ)
+            )
+            return result
+        
+        I_xx = triple_integral(integrandI_xx, a0, b0, a1, b1, H) * rho
+        I_yy = triple_integral(integrandI_yy, a0, b0, a1, b1, H) * rho
+        I_zz = triple_integral(integrandI_zz, a0, b0, a1, b1, H) * rho
+
+    return I_xx, I_yy, I_zz
+
+def FrustumMOI(dA, dB, H, p):
+    '''returns the radial and axial moments of inertia of a potentially tapered circular member about the end node.
+    Previously used equations found in a HydroDyn paper, now it uses newly derived ones. Ask Stein for reference if needed'''
+    if H==0:        # if there's no height, mainly refering to no ballast, there shouldn't be any extra MoI
+        I_rad = 0                                                   # radial MoI about end node [kg-m^2]
+        I_ax = 0                                                    # axial MoI about axial axis [kg-m^2]
+    else:
+        if dA==dB:  # if it's a cylinder
+            r1 = dA/2                                               # bottom radius [m]
+            r2 = dB/2                                               # top radius [m]
+            I_rad = (1/12)*(p*H*np.pi*r1**2)*(3*r1**2 + 4*H**2)     # radial MoI about end node [kg-m^2]
+            I_ax = (1/2)*p*np.pi*H*r1**4                            # axial MoI about axial axis [kg-m^2]
+        else:       # if it's a tapered cylinder (frustum)
+            r1 = dA/2                                               # bottom radius [m]
+            r2 = dB/2                                               # top radius [m]
+            I_rad = (1/20)*p*np.pi*H*(r2**5 - r1**5)/(r2 - r1) + (1/30)*p*np.pi*H**3*(r1**2 + 3*r1*r2 + 6*r2**2) # radial MoI about end node [kg-m^2]
+            I_ax = (1/10)*p*np.pi*H*(r2**5-r1**5)/(r2-r1)           # axial MoI about axial axis [kg-m^2
+    return I_rad, I_ax
 
 
 def getKinematics(r, Xi, ws):
@@ -587,7 +681,7 @@ def getRMS(xi):
     return np.sqrt( 0.5*np.sum( np.abs(xi)**2 ) )
 
 
-def getPSD(xi, dw):
+def getPSD(xi:np.ndarray, dw):
     '''Calculates power spectral density from inputted (complex) response amplitude vector. Units of [unit]^2/(rad/s).
     If a matrix is provided, the first dimension is considered to be multiple cases and the
     second dimension is considered to be frequencies. Results are summed across cases for 

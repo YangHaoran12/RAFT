@@ -6,20 +6,21 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from raft.pyIECWind         import pyIECWind_extreme
-from raft.raft_member import Member
+from raft.raft_member import Member, BladeMember
 
 from scipy.interpolate      import PchipInterpolator
 from scipy.special          import modstruve, iv
 
+from raft.airfoilprep import Polar
 
-from raft.helpers import rotationMatrix, getFromDict, rotateMatrix3, rotateMatrix6, RotFrm2Vect
+from raft.helpers import rotationMatrix, getFromDict, rotateMatrix3, rotateMatrix6, RotFrm2Vect, readPolar, readCoordinate
 
 try:
     from ccblade.ccblade import CCBlade, CCAirfoil
 except:
-    from wisdem.ccblade.ccblade import CCBlade, CCAirfoil, _bem
+    from wisdem.ccblade.ccblade import CCBlade, CCAirfoil
 
-
+from typing import Iterable
 import pickle
 
 if False:
@@ -178,6 +179,7 @@ class Rotor:
 
         # ----- AIRFOIL STUFF ------
         
+        self.AFMode = getFromDict(turbine, 'AFMode', shape=0, default=0)
         # compile info for airfoil station points along the blade
         #nStations = len(turbine['blade'][ir]["airfoils"])
         station_airfoil  = [ b for [a,b] in turbine['blade'][ir]["airfoils"] ]  # airfoil name
@@ -193,118 +195,104 @@ class Rotor:
         # compile info for individual airfoils
         n_af = len(turbine["airfoils"])  #len(np.unique(station_airfoil))  # number of airfoils that are used in the rotor
         airfoil_name = n_af * [""]         # name of each listed airfoil
+        airfoil_Re   = n_af * [0]
         airfoil_thickness = np.zeros(n_af) # relative thickness of each listed airfoil (thickness/chord)
         Ca = np.zeros([n_af, 2])           # added mass coefficient [edgewise, flapwise] of each airfoil
+        
         for i in range(n_af):
             airfoil_name[i] = turbine["airfoils"][i]["name"]
-            airfoil_thickness[i] = turbine["airfoils"][i]["relative_thickness"]
-            if 'added_mass_coeff' in turbine["airfoils"][i].keys():
-                Ca[i,:] = turbine["airfoils"][i]["added_mass_coeff"]
-            else:
-                Ca[i,:] = [0.5, 1.0]  # default added mass coefficients if not supplied
+            airfoil_thickness[i] = getFromDict(turbine["airfoils"][i], "relative_thickness", shape=0, default=0.2)
+            airfoil_Re[i] = getFromDict(turbine['airfoils'][i], 'Re', shape=0, default=0.0)
+            Ca[i,:] = getFromDict(turbine["airfoils"][i], "added_mass_coeff", shape=-1, default=[0.5, 1.0])
+            # if 'added_mass_coeff' in turbine["airfoils"][i].keys():
+            #     Ca[i,:] = turbine["airfoils"][i]["added_mass_coeff"]
+            # else:
+            #     Ca[i,:] = [0.5, 1.0]  # default added mass coefficients if not supplied
 
-
-        cl = np.zeros((n_af, n_aoa, 1))
-        cd = np.zeros((n_af, n_aoa, 1))
-        cm = np.zeros((n_af, n_aoa, 1))
+        # cl = np.zeros((n_af, n_aoa, 1))
+        # cd = np.zeros((n_af, n_aoa, 1))
+        # cm = np.zeros((n_af, n_aoa, 1))
         cpmin = np.zeros((n_af, n_aoa, 1))
         if len(np.array(turbine["airfoils"][i]['data'])[0]) > 4:
             cpmin_flag = True
         else:
             cpmin_flag = False
 
+        polar_list = []
+
         # Interp cl-cd-cm along predefined grid of angle of attack
         for i in range(n_af):
 
-            polar_table = np.array(turbine["airfoils"][i]['data'])
+            if self.AFMode == 0:         
+                polar_table = np.array(turbine["airfoils"][i]['data'])
+                polar = Polar(airfoil_Re[i], polar_table[:,0], polar_table[:,1], polar_table[:,2], polar_table[:,3])
+
+            elif self.AFMode == 1:
+                polar_file = os.path.join(raft_dir, "designs/airfoil/polar", f"{airfoil_name[i]}.dat")
+                polar_table = readPolar(polar_file)
+                polar = Polar(airfoil_Re[i], polar_table[:,0], polar_table[:,1], polar_table[:,2], polar_table[:,3])
+                
+
+            elif self.AFMode == 2:
+
+                pass
+
+                # if abs(polar_table[0,0] + 180) > 1e-5 or abs(polar_table[-1,0] - 180) <1e-5:
+                #     polar.extrapolate(cdmax=1.5, nalpha=15)
+            else:
+
+                raise ValueError("AFMode should be 0, 1 or 2")
             
             # Note: polar_table[:,0] must be in degrees
-            cl[i, :, 0] = np.interp(aoa, polar_table[:,0], polar_table[:,1])
-            cd[i, :, 0] = np.interp(aoa, polar_table[:,0], polar_table[:,2])
-            cm[i, :, 0] = np.interp(aoa, polar_table[:,0], polar_table[:,3])
+            # cl[i, :, 0] = np.interp(aoa, polar_table[:,0], polar_table[:,1])
+            # cd[i, :, 0] = np.interp(aoa, polar_table[:,0], polar_table[:,2])
+            # cm[i, :, 0] = np.interp(aoa, polar_table[:,0], polar_table[:,3])
             if cpmin_flag:
                 cpmin[i, :, 0] = np.interp(aoa, polar_table[:,0], polar_table[:,4])
                         
-            if abs(cl[i, 0, 0] - cl[i, -1, 0]) > 1.0e-5:
-                print("WARNING: Ai " + airfoil_name[i] + " has the lift coefficient different between + and - pi rad. This is fixed automatically, but please check the input data.")
-                cl[i, 0, 0] = cl[i, -1, 0]
-            if abs(cd[i, 0, 0] - cd[i, -1, 0]) > 1.0e-5:
-                print("WARNING: Airfoil " + airfoil_name[i] + " has the drag coefficient different between + and - pi rad. This is fixed automatically, but please check the input data.")
-                cd[i, 0, 0] = cd[i, -1, 0]
-            if abs(cm[i, 0, 0] - cm[i, -1, 0]) > 1.0e-5:
-                print("WARNING: Airfoil " + airfoil_name[i] + " has the moment coefficient different between + and - pi rad. This is fixed automatically, but please check the input data.")
-                cm[i, 0, 0] = cm[i, -1, 0]
-            if cpmin_flag and abs(cpmin[i, 0, 0] - cpmin[i, -1, 0]) > 1.0e-5:
-                print("WARNING: Airfoil " + airfoil_name[i] + " has the minimum pressure coefficient different between + and - pi rad. This is fixed automatically, but please check the input data.")
-                cpmin[i, 0, 0] = cpmin[i, -1, 0]
+            # if abs(polar.cl[i, 0, 0] - polar.cl[i, -1, 0]) > 1.0e-5:
+            #     print("WARNING: Ai " + airfoil_name[i] + " has the lift coefficient different between + and - pi rad. This is fixed automatically, but please check the input data.")
+            #     polar.cl[i, 0, 0] = polar.cl[i, -1, 0]
+            # if abs(polar.cd[i, 0, 0] - polar.cd[i, -1, 0]) > 1.0e-5:
+            #     print("WARNING: Airfoil " + airfoil_name[i] + " has the drag coefficient different between + and - pi rad. This is fixed automatically, but please check the input data.")
+            #     polar.cd[i, 0, 0] = polar.cd[i, -1, 0]
+            # if abs(polar.cm[i, 0, 0] - polar.cm[i, -1, 0]) > 1.0e-5:
+            #     print("WARNING: Airfoil " + airfoil_name[i] + " has the moment coefficient different between + and - pi rad. This is fixed automatically, but please check the input data.")
+            #     polar.cm[i, 0, 0] = polar.cm[i, -1, 0]
+            # if cpmin_flag and abs(cpmin[i, 0, 0] - cpmin[i, -1, 0]) > 1.0e-5:
+            #     print("WARNING: Airfoil " + airfoil_name[i] + " has the minimum pressure coefficient different between + and - pi rad. This is fixed automatically, but please check the input data.")
+            #     cpmin[i, 0, 0] = cpmin[i, -1, 0]
 
+            polar_list.append(polar)
 
-
-        # Set discretization parameters
-        nSector = getFromDict(turbine['blade'][ir], 'nSector', default=4) # number of equally spaced azimuthal positions for CCblade to compute and average over
-        nr = int(getFromDict(turbine['blade'][ir], 'nr', default=20)) # number of radial blade stations (or blade elements) to use
-        
-        grid = np.linspace(0., 1., nr, endpoint=False) + 0.5/nr # equally spaced grid along blade span, root=0 tip=1
-
-
-        # ----- Interpolate airfoil coefficients over the blade span using a pchip on relative thickness -----
-        
+        station_polar = []
         station_thickness = np.zeros(nStations)
         station_Ca = np.zeros((nStations, 2))
-        station_cl = np.zeros((nStations, n_aoa, 1))
-        station_cd = np.zeros((nStations, n_aoa, 1))
-        station_cm = np.zeros((nStations, n_aoa, 1))
-        station_cpmin = np.zeros((nStations, n_aoa, 1))
-
-        # copy-paste coefficient values from airfoil database to each station point along the blade
         for i in range(nStations):
             for j in range(n_af):
                 if station_airfoil[i] == airfoil_name[j]:
+                    station_polar.append(polar_list[j])
                     station_thickness[i] = airfoil_thickness[j]
                     station_Ca[i,:] = Ca[j,:]
-                    station_cl[i, :, :] = cl[j, :, :]
-                    station_cd[i, :, :] = cd[j, :, :]
-                    station_cm[i, :, :] = cm[j, :, :]
-                    station_cpmin[i, :, :] = cpmin[j, :, :]
                     break
 
-        if np.all(station_thickness == np.flip(sorted(station_thickness))):  # if the airfoils get consistently thinner toward the tip
 
-            # Spanwise interpolation of the airfoil polars with a pchip
-            spline = PchipInterpolator  # select spline interpolation method
-            
-            # spline interpolate airfoil thickness over evenly spaced element locations along span
-            rthick_spline = spline(station_position, station_thickness)
-            self.r_thick_interp = rthick_spline(grid) 
-            
-            # make nonredundant (and sorted) list of airfoil thicknesses (and indices)
-            r_thick_unique, indices = np.unique(station_thickness, return_index=True)
-            
-            Ca_spline = spline(station_position, station_Ca)
-            self.Ca_interp = Ca_spline(grid)
-            
-            cl_spline = spline(r_thick_unique, station_cl[indices, :, :])
-            self.cl_interp = np.flip(cl_spline(np.flip(self.r_thick_interp)), axis=0)
-            
-            cd_spline = spline(r_thick_unique, station_cd[indices, :, :])
-            self.cd_interp = np.flip(cd_spline(np.flip(self.r_thick_interp)), axis=0)
-            
-            cm_spline = spline(r_thick_unique, station_cm[indices, :, :])
-            self.cm_interp = np.flip(cm_spline(np.flip(self.r_thick_interp)), axis=0)
-            
-            cpmin_spline = spline(r_thick_unique, station_cpmin[indices, :, :])
-            self.cpmin_interp = np.flip(cpmin_spline(np.flip(self.r_thick_interp)), axis=0)
+        # Set discretization parameters
+        nSector = getFromDict(turbine['blade'][ir], 'nSector', default=8) # number of equally spaced azimuthal positions for CCblade to compute and average over
+        nr = getFromDict(turbine['blade'][ir], 'nr', dtype=int, default=20) # number of radial blade stations (or blade elements) to use
         
-        else:  # if it's an atypical case with non-ordered airfoil thicknesses
-            # do simple span-based interpolation
-            breakpoint()
-            self.Ca_interp    = np.interp(grid, station_position, station_Ca)
-            self.cl_interp    = np.interp(grid, station_position, station_cl)
-            self.cd_interp    = np.interp(grid, station_position, station_cd)
-            self.cm_interp    = np.interp(grid, station_position, station_cm)
-            self.cpmin_interp = np.interp(grid, station_position, station_cpmin)
+        grid = np.linspace(0., 1., nr, endpoint=False) + 0.5/nr # equally spaced grid along blade span, root=0 tip=1
+
+        # grid = 0.5*(np.sin(0.5*np.pi*(np.linspace(-1, 1, nr, endpoint=False) + 0.5/nr)) + 1)
+
+        spline = PchipInterpolator  # select spline interpolation method
         
-        self.aoa = aoa
+        # spline interpolate airfoil thickness over evenly spaced element locations along span
+        rthick_spline = spline(station_position, station_thickness)
+        self.r_thick_interp = rthick_spline(grid)
+
+        Ca_spline = spline(station_position, station_Ca)
+        self.Ca_interp = Ca_spline(grid)
         
         # split out blade geometry info from table 
         geometry_table = np.array(turbine['blade'][ir]['geometry'])
@@ -312,12 +300,20 @@ class Rotor:
         self.dr = (rtip - self.Rhub)/nr
         
         # radial locations of blade elements for BEM
-        self.blade_r      = np.linspace(self.Rhub, rtip, nr, endpoint=False) + self.dr/2  
+        # grid             =  np.sin(0.5*np.pi*(np.linspace(0, 1, nr, endpoint=False) + 0.5/nr)) 
+        # self.blade_r      = np.sin(np.linspace(0, 1, nr, endpoint=False) + 0.5/nr)  
+        # self.blade_r      = np.linspace(self.Rhub, rtip, nr, endpoint=False) + self.dr/2
+        self.blade_r      = (rtip - self.Rhub) * grid + self.Rhub 
         
         self.blade_chord  = np.interp(self.blade_r, r_input, geometry_table[:,1])
         self.blade_theta  = np.interp(self.blade_r, r_input, geometry_table[:,2])
         blade_precurve    = np.interp(self.blade_r, r_input, geometry_table[:,3])
         blade_presweep    = np.interp(self.blade_r, r_input, geometry_table[:,4])
+
+        if geometry_table.shape[1] == 6:
+            self.pitch_axis = np.interp(self.blade_r, r_input, geometry_table[:,5])
+        else:
+            self.pitch_axis = np.ones_like(grid) * 0.25
         #  <<<<<< move this to beginning, then do some interpolating to unify grid and blade_r <<<<<<< and go from above 0 to below 1
 
         if self.r3[2] < 0:
@@ -329,10 +325,38 @@ class Rotor:
             self.mu = turbine['mu_air']
             self.shearExp = turbine['shearExp_air']
         
-        af = []
-        for i in range(self.cl_interp.shape[0]):
-            af.append(CCAirfoil(self.aoa, [], self.cl_interp[i,:,:],self.cd_interp[i,:,:],self.cm_interp[i,:,:]))
-        
+
+        af:Iterable[CCAirfoil] = []
+        af_flag = 0
+        for i in range(nr):
+            if i == nr-1:
+                aoa = station_polar[-1].alpha
+                Re  = station_polar[-1].Re
+                cl  = station_polar[-1].cl
+                cd  = station_polar[-1].cd
+                cm  = station_polar[-1].cm
+                af.append(CCAirfoil(aoa, [Re], cl, cd, cm, AFName=station_airfoil[-1]))
+                
+                break
+            elif grid[i] > station_position[af_flag] and grid[i] <= station_position[af_flag+1]:
+                aoa = station_polar[af_flag].alpha
+                Re  = station_polar[af_flag].Re
+                cl  = station_polar[af_flag].cl
+                cd  = station_polar[af_flag].cd
+                cm  = station_polar[af_flag].cm
+                af.append(CCAirfoil(aoa, [Re], cl, cd, cm, AFName=station_airfoil[af_flag]))
+            elif grid[i] > station_position[af_flag+1]:
+                aoa = station_polar[af_flag+1].alpha
+                Re  = station_polar[af_flag+1].Re
+                cl  = station_polar[af_flag+1].cl
+                cd  = station_polar[af_flag+1].cd
+                cm  = station_polar[af_flag+1].cm
+                af.append(CCAirfoil(aoa, [Re], cl, cd, cm, AFName=station_airfoil[af_flag+1]))
+
+            if grid[i+1] > station_position[af_flag+1]:
+                af_flag += 1
+
+            
         # >>> There is an inconsistency between the geometric and airfoil inputs that needs to be corrected! <<<
         
         self.ccblade = CCBlade(
@@ -368,7 +392,8 @@ class Rotor:
         # create a member list of blade sections, only if rotor is underwater
         if self.r3[2] + self.R_rot < 0:
             #self.bladeAirfoil2Member()
-            self.bladeGeometry2Member()
+            # self.bladeGeometry2Member()
+            self.bladeGeometry2BladeMember(geometry_table)
         else:
             self.bladeMemberList = []
     
@@ -407,6 +432,9 @@ class Rotor:
         
         # Set absolute hub coordinate [m] for use in various aero/hydro calcs
         self.r3 = r6[:3] + self.r_hub_rel  
+        if hasattr(self, 'ccblade'):
+            self.ccblade.hubHt = self.r3[2]
+
         
     
     def setYaw(self, yaw=None):
@@ -572,6 +600,98 @@ class Rotor:
 
     #         self.bladeMemberList.append(Member(airfoil, len(self.w)))
     
+    def bladeGeometry2BladeMember(self, geometry_table=np.ndarray, pitch=0):
+        '''A function to create RAFT BladeMembers based on rotor blades (Yang currently used). 
+        slightly different from the original version bladeGeometry2Member
+
+        Method to create members for each "node" that is specified in turbine['blade']['geometry']
+        To be used for added mass and buoyancy calculations of underwater turbines'''
+
+        self.bladeMemberList:Iterable[BladeMember] = []
+        from raft.helpers import inerpStr
+
+        if geometry_table.shape[1] == 6:
+            pitch_axis = geometry_table[:,5]
+        else:
+            pitch_axis = np.ones_like(geometry_table[:, 0]) * 0.25
+        
+        r = np.zeros((geometry_table.shape[0], 3))
+        r_section = []
+        af_name = [af.AFName for af in self.ccblade.af]
+        af_list = inerpStr(geometry_table[:, 0], self.ccblade.r, af_name)
+
+        for i in range(len(geometry_table[:, 0])):
+                  
+            file = os.path.join(raft_dir, f"designs/airfoil/coordinate/{af_list[i]}.txt")
+            coord = readCoordinate(file)
+
+            if coord[0, 1] == coord[-1, 1]:
+                print(f"Warnig: y coordinate of coord[0, 1] and coord[-1, 1] should not be the same, both will be deleted")
+                coord = coord[1:-1]
+            
+            rpts = []
+
+            n_p = coord.shape[0]  # number of points in airfoil coordinate file
+            r_b = np.array([geometry_table[i, 3], geometry_table[i, 4], geometry_table[i, 0]])     # airfoil center in coordinates in blade-aligned coordinate system
+
+            R = rotationMatrix(np.deg2rad(self.azimuths[0]), -np.rad2deg(self.precone), -geometry_table[i, 2]-pitch)    # R_z(-twist-pitch) -> R_y(-cone) -> R_x(azimuth) 
+            for j in range(n_p):
+
+                x = coord[j, 1] * geometry_table[i, 1] + r_b[0]    # x coordinate in blade-aligned coordinate system
+                y = (coord[j, 0]-pitch_axis[i]) * geometry_table[i, 1] + r_b[1]    # y coordinate in blade-aligned coordinate system
+                z = r_b[2]                                          # z coordinate in blade-aligned coordinate system
+
+                rpts_rel = np.matmul(self.R_q, np.matmul(R, np.array([x,y,z])))
+                rpts.append([rpts_rel[0]+self.r3[0], rpts_rel[1]+self.r3[1], rpts_rel[2]+self.r3[2]])
+            
+                                                                                    # coordinates in azimuth-aligned coordinate system
+            rc = np.matmul(self.R_q, np.matmul(R, r_b))                         # coordinates in absolute coordinate system w.r.t. hub
+            r[i]  = np.array([rc[0]+self.r3[0], rc[1]+self.r3[1], rc[2]+self.r3[2]]) # absolute coordinate
+            r_section.append(rpts)
+            
+        for i in range(len(geometry_table[:, 0])-1):    
+            
+            blademem = {}
+            blademem['name'] = i
+            blademem['type'] = 3
+            
+            blademem['rA'] = r[i]
+            blademem['rB'] = r[i+1]
+
+            blademem['rSectionA'] = r_section[i]
+            blademem['rSectionB'] = r_section[i+1]
+
+            blademem['shape'] = 'rect'
+            blademem['stations'] = [0,1]
+
+            chord = geometry_table[i, 1]
+            
+            r_thick_interp = np.interp(geometry_table[:, 0], self.blade_r, self.r_thick_interp)
+            rel_thick = r_thick_interp[i]
+            
+            area = (np.pi/4)*chord**2 * rel_thick
+            rect_thick = area/chord  # thickness of rectange with same chord length to achieve same cross sectional area
+            blademem['d'] = [[chord, rect_thick],[chord, rect_thick]]
+
+            blademem['gamma'] = geometry_table[i, 2] + pitch
+
+            blademem['potMod'] = False
+
+            blademem['Cd'] = 0.0
+            Ca_interp = np.stack((np.interp(geometry_table[:, 0], self.blade_r, self.Ca_interp[:, 0]), 
+                                  np.interp(geometry_table[:, 0], self.blade_r, self.Ca_interp[:, 1])), axis=-1)
+            blademem['Ca'] = Ca_interp[i]    
+            blademem['CdEnd'] = 0.0
+            blademem['CaEnd'] = 0.0
+        
+            blademem['t'] = 0.01
+            blademem['rho_shell'] = 1850
+
+            from raft.raft_member import BladeMember
+
+            self.bladeMemberList.append(BladeMember(blademem, len(self.w)))
+        
+        # self.nodes = np.zeros([int(self.nBlades), len(self.bladeMemberList)+1, 3])      # array to hold xyz positions of each node along a blade for each blade (filled in later)
 
     def bladeGeometry2Member(self):
         '''Second iteration of a function to create RAFT members based on rotor blades (is currently used).
@@ -579,7 +699,7 @@ class Rotor:
         Method to create members for each "node" that is specified in turbine['blade']['geometry']
         To be used for added mass and buoyancy calculations of underwater turbines'''
 
-        self.bladeMemberList = []
+        self.bladeMemberList:Iterable[BladeMember] = []
 
         for i in range(len(self.blade_r)-1):
             blademem = {}
@@ -870,7 +990,7 @@ class Rotor:
                 
         # rotor inflow misalignment heading and tilt for CCBlade [rad]
         yaw_misalign = np.arctan2(self.q[1], self.q[0]) - self.inflow_heading
-        turbine_tilt = np.arctan2(self.q[2], np.hypot(self.q[0], self.q[1]))
+        turbine_tilt = -np.arctan2(self.q[2], np.hypot(self.q[0], self.q[1]))
         # >>> should double check signs <<<
         
         # call CCBlade
@@ -949,10 +1069,10 @@ class Rotor:
             
             a_aer = np.zeros_like(self.w)
             b_aer = np.zeros_like(self.w)
-            C   = np.zeros_like(self.w,dtype=np.complex_)
-            C2  = np.zeros_like(self.w,dtype=np.complex_)
-            D   = np.zeros_like(self.w,dtype=np.complex_)
-            E   = np.zeros_like(self.w,dtype=np.complex_)
+            C   = np.zeros_like(self.w,dtype=np.complex128)
+            C2  = np.zeros_like(self.w,dtype=np.complex128)
+            D   = np.zeros_like(self.w,dtype=np.complex128)
+            E   = np.zeros_like(self.w,dtype=np.complex128)
 
             # Roots of characteristic equation, helps w/ debugging
             # p = np.array([-self.I_drivetrain, (dQ_dOm + self.kp_beta * dQ_dPi - self.Ng * kp_tau), self.ki_beta* dQ_dPi - self.Ng * ki_tau])
@@ -1275,10 +1395,384 @@ class Rotor:
         Rot[np.isnan(Rot)] = 0
 
         return U, V, W, Rot
+    
 
+    def baldeGeo2Mesh(self, 
+                      geometry_table=np.ndarray, 
+                      pitch=0., # deg
+                      constraint=0.1,
+                      mesh_size_max=1,
+                      shroud_radius=3, 
+                      show=False,
+                      mesh=False, 
+                      all=False, 
+                      save=False,
+                      vtk_show=False, 
+                      meshFile=os.path.join(raft_dir, "blade_mesh/blade.msh")
+                      ):
+        '''A function to create RAFT BladeMembers based on rotor blades (Yang currently used). 
+        slightly different from the original version bladeGeometry2Member
+
+        Method to create members for each "node" that is specified in turbine['blade']['geometry']
+        To be used for added mass and buoyancy calculations of underwater turbines'''
+
+        from raft.helpers import inerpStr
+        import gmsh
+        gmsh.initialize()
+
+        if geometry_table.shape[1] == 6:
+            pitch_axis = geometry_table[:,5]
+        else:
+            pitch_axis = np.ones_like(geometry_table[:, 0]) * 0.25
+        
+
+        af_name = [af.AFName for af in self.ccblade.af]
+        af_list = inerpStr(geometry_table[:, 0], self.ccblade.r, af_name)
+
+        curve_loop = []
+
+        for i in range(len(geometry_table[:, 0])):
+                  
+            file = os.path.join(raft_dir, f"designs/airfoil/coordinate/{af_list[i]}.txt")
+            coord = readCoordinate(file)
+
+            if coord[0, 1] == coord[-1, 1]:
+                print(f"Warnig: y coordinate of coord[0, 1] and coord[-1, 1] should not be the same, both will be deleted")
+                coord = coord[1:-1]
+
+            rpts = []
+
+            n_p = coord.shape[0]  # number of points in airfoil coordinate file
+            r_b = np.array([geometry_table[i, 3], geometry_table[i, 4], geometry_table[i, 0]])     # airfoil center in coordinates in blade-aligned coordinate system
+
+            R = rotationMatrix(np.deg2rad(self.azimuths[0]), -np.deg2rad(self.precone), -np.deg2rad(geometry_table[i, 2]-pitch))    # R_z(-twist-pitch) -> R_y(-cone) -> R_x(azimuth) 
+            for j in range(n_p):
+
+                x = coord[j, 1] * geometry_table[i, 1] + r_b[0]    # x coordinate in blade-aligned coordinate system
+                y = (coord[j, 0]-pitch_axis[i]) * geometry_table[i, 1] + r_b[1]    # y coordinate in blade-aligned coordinate system
+                z = r_b[2]                                          # z coordinate in blade-aligned coordinate system
+
+                rpts_rel = np.matmul(self.R_q, np.matmul(R, np.array([x,y,z])))
+                rpts.append(gmsh.model.occ.addPoint(rpts_rel[0]+self.r3[0], 
+                                                    rpts_rel[1]+self.r3[1], 
+                                                    rpts_rel[2]+self.r3[2], 
+                                                    geometry_table[i, 1]*constraint))
+            
+            # rpts.append(rpts[0])
+            curv = []
+            
+            curv.append(gmsh.model.occ.addBSpline(rpts[0: n_p // 2+1]))
+            curv.append(gmsh.model.occ.addBSpline(rpts[n_p // 2:]))
+            curv.append(gmsh.model.occ.addLine(rpts[-1], rpts[0]))
+            curve_loop.append(gmsh.model.occ.addCurveLoop(curv))
+        
+        # gmsh.model.occ.synchronize()
+        # gmsh.model.occ.addThruSections(curv[:6], 1, parametrization="IsoParametric", continuity = "G1" )
+        # gmsh.model.occ.addThruSections(curv[5:7], 2, continuity = "G1" )
+        # gmsh.model.occ.addThruSections(curv[6:], 3)
+        # gmsh.option.setNumber("Mesh.MeshSizeFromCurvatureIsotropic", 1)
+        # gmsh.model.occ.synchronize()
+        # gmsh.fltk.run()
+        gmsh.model.occ.addThruSections(curve_loop, continuity="C2")
+        gmsh.model.occ.synchronize()
+        # gmsh.fltk.run()
+        
+        gmsh.option.setNumber("Geometry.NumSubEdges", 100)
+        # for iter in range(1, len(curve_loop)):
+        #     gmsh.model.occ.addThruSections([iter, iter+1], iter)
+
+        # gmsh.model.occ.fuse([(3,1)], [(3, i) for i in range(2, len(curve_loop))])
+        # gmsh.model.occ.synchronize()
+        # gmsh.fltk.run()
+
+        if all is True:
+            tmp1 = gmsh.model.occ.copy([(3,1)])
+            tmp2 = gmsh.model.occ.copy([(3,1)])
+            gmsh.model.occ.rotate(tmp1, self.r3[0], self.r3[1], self.r3[2], self.q[0], self.q[1], self.q[2], np.deg2rad(self.azimuths[1]))
+            gmsh.model.occ.rotate(tmp2, self.r3[0], self.r3[1], self.r3[2], self.q[0], self.q[1], self.q[2], np.deg2rad(self.azimuths[2]))
+            
+            gmsh.model.occ.addSphere(self.r3[0],
+                                     self.r3[1], 
+                                     self.r3[2], 
+                                     shroud_radius)
+            
+            gmsh.model.occ.synchronize()
+            gmsh.model.occ.mesh.setSize(gmsh.model.getBoundary([(3,4)], recursive=True), shroud_radius*1.5*constraint)
+            gmsh.option.setNumber("Mesh.MeshSizeMax", mesh_size_max)
+            gmsh.model.occ.fuse([(3,1),(3,2),(3,3)], [(3, 4)])
+
+        gmsh.model.occ.synchronize()
+        surf_list = gmsh.model.getEntities(2)
+        surf = [i[1] for i in surf_list]
+        
+        if all is True:
+            gmsh.model.addPhysicalGroup(2, surf, 1, "rotor")
+        
+        else:
+            gmsh.model.addPhysicalGroup(2, surf, 1, "blade")
+        
+        if mesh is True:
+            gmsh.option.setNumber('Mesh.Smoothing', 5)
+            gmsh.option.setNumber('Mesh.SmoothNormals', 1)
+            # gmsh.option.setNumber('Mesh.MeshSizeFromCurvature', 5)
+            gmsh.model.mesh.generate(2)
+        
+        if show is True:
+            gmsh.fltk.run()
+
+        if vtk_show is True:
+            
+            nodes, coords = gmsh.model.mesh.getNodesForPhysicalGroup(2, 1)
+            elementType, elements, elementNodes = gmsh.model.mesh.getElements()
+
+            nVertices = len(nodes)
+            vertices = np.array(coords).reshape(nVertices, 3)
+
+            if len(elementType[1:-1]) == 2: # triangular and quadature faces
+                nTriFaces    = elements[1].shape[0]
+                nQuadFaces   = elements[2].shape[0]
+
+                faces_ = np.array(elementNodes[1]-1).reshape(nTriFaces ,3)
+                triFaces = np.hstack((faces_, faces_[:, [0]]))
+
+                quadFaces = np.array(elementNodes[2]-1).reshape(nQuadFaces ,4)
+
+                faces = np.asarray(np.vstack((triFaces, quadFaces)))
+
+            elif len(elementType[1:-1]) == 1 and elementType[1] == 2: # all triangular faces
+                nFaces = elements[1].shape[0]
+
+                faces_ = np.array(elementNodes[1]-1).reshape(nFaces ,3)
+                faces = np.hstack((faces_, faces_[:, [0]]))
+
+            elif len(elementType[1:-1]) == 1 and elementType[1] == 3: # all rectangular faces
+                nFaces = elements[1].shape[0]
+
+                faces = np.array(elementNodes[1]-1).reshape(nFaces ,4)
+
+            from meshmagick.mesh import Mesh
+            from meshmagick.mmio import write_MAR, write_STL, write_VTK
+
+            vtk_mesh = Mesh(vertices ,faces, name="rotor")
+            vtk_mesh.show()
+            
+            if save:
+                write_MAR(str(meshFile)[:-3]+'dat', vertices, faces)
+                write_STL(str(meshFile)[:-3]+'stl', vertices, faces)
+                write_VTK(str(meshFile)[:-3]+'vtk', vertices, faces)
+        
+        if save:
+            gmsh.option.setNumber('Mesh.Format', 1)
+            gmsh.option.setNumber("Mesh.MshFileVersion", 2.2)
+            gmsh.option.setNumber("Mesh.SaveParametric", 0)
+            gmsh.write(meshFile)
+
+        gmsh.finalize()
+
+
+
+    def bladeMesh(self,
+                  pitch = 0.,
+                  constraint=0.1,
+                  mesh_size_max=1, 
+                  shroud_length=6, 
+                  shroud_radius=3, 
+                  show=False,
+                  mesh=False, 
+                  all=False, 
+                  save=False,
+                  vtk_show=False, 
+                  meshFile=os.path.join(raft_dir, "blade_mesh/blade.msh")):
+        
+        '''use gmsh to generate blade mesh of single/each blade of the whole tuebine, hub is currently ignored.
+           must be called after setPosition() and setYaw()
+        
+        Parameters
+        ----------        
+        show: bool
+            If true, produces a 2d plot on the axes defined by Xuvec and Yuvec. 
+            Otherwise produces a 3d plot (default).
+        : bool
+            If true, draw circle of rotor circumference.
+        '''
+        import gmsh
+        
+        from raft.helpers import getCone
+
+        r_blade        = np.concatenate(([self.ccblade.Rhub], self.ccblade.r, [self.ccblade.Rtip]))
+        chord_blade    = np.concatenate(([self.ccblade.chord[0]], self.ccblade.chord, [self.ccblade.chord[-1]]))
+        theta_blade    = np.concatenate(([self.ccblade.theta[0]], self.ccblade.theta, [self.ccblade.theta[-1]]))
+        precurve_blade = np.concatenate(([0], self.ccblade.precurve, [self.ccblade.precurveTip]))
+        presweep_blade = np.concatenate(([0], self.ccblade.presweep, [self.ccblade.presweepTip]))                                              # not an array
+        pitch_axis     = np.concatenate(([self.pitch_axis[0]], self.pitch_axis, [self.pitch_axis[-1]]))
+
+        af_list = self.ccblade.af.copy()
+        af_list.insert(0, self.ccblade.af[0])
+        af_list.append(self.ccblade.af[-1])
+
+        gmsh.initialize()
+
+        curv = []
+        for i, af in enumerate(self.ccblade.af):
+
+            file = os.path.join(raft_dir, f"designs/airfoil/coordinate/{af.AFName}.txt")
+            coord = readCoordinate(file)
+
+            n_p = coord.shape[0]    # number of points in airfoil coordinate file
+            r_b = np.array([precurve_blade[i], presweep_blade[i], r_blade[i]])     # airfoil center in coordinates in blade-aligned coordinate system
+
+            pts = []
+            for j in range (n_p):
+
+                x = coord[j, 1] * chord_blade[i] + r_b[0]    # x coordinate in blade-aligned coordinate system
+                y = (coord[j, 0]-pitch_axis[i]) * chord_blade[i] + r_b[1]    # y coordinate in blade-aligned coordinate system
+                z = r_b[2]                                          # z coordinate in blade-aligned coordinate system
+
+                r0 = np.array([x,y,z])   # coordinates in blade-aligned coordinate system
+                R = rotationMatrix(np.deg2rad(self.azimuths[0]), -np.deg2rad(self.precone), -theta_blade[i]-pitch)    # R_z(-twist-pitch) * R_y(-cone) * R_x(azimuth) 
+                                                                                    # coordinates in azimuth-aligned coordinate system
+                
+                r1 = np.matmul(self.R_q, np.matmul(R, r0))                         # coordinates in absolute coordinate system
+                r  = np.array([r1[0]+self.r3[0], r1[1]+self.r3[1], r1[2]+self.r3[2]])
+
+                if j == 0:
+                    pts.append(gmsh.model.occ.addPoint(r[0], r[1], r[2], chord_blade[i]*constraint*0.8))
+                elif j == n_p // 2 or j == n_p // 2+1:
+                    pts.append(gmsh.model.occ.addPoint(r[0], r[1], r[2], chord_blade[i]*constraint*0.8))
+                else:
+                    pts.append(gmsh.model.occ.addPoint(r[0], r[1], r[2], chord_blade[i]*constraint))
+
+            pts.append(pts[0])
+
+            curv.append(gmsh.model.occ.addBSpline(pts))
+            gmsh.model.occ.addCurveLoop([curv[i]])
+
+        for iter in range(len(curv) - 1):
+            gmsh.model.occ.addThruSections([curv[iter], curv[iter+1]], iter+1, maxDegree=2)
+
+        gmsh.model.occ.fuse([(3,1)], [(3, i) for i in range(2, len(curv))])
+        gmsh.model.occ.synchronize()
+
+
+        if all is True:
+
+            tmp1 = gmsh.model.occ.copy([(3,1)])
+            tmp2 = gmsh.model.occ.copy([(3,1)])
+            gmsh.model.occ.rotate(tmp1, self.r3[0], self.r3[1], self.r3[2], self.q[0], self.q[1], self.q[2], np.deg2rad(self.azimuths[1]))
+            gmsh.model.occ.rotate(tmp2, self.r3[0], self.r3[1], self.r3[2], self.q[0], self.q[1], self.q[2], np.deg2rad(self.azimuths[2]))
+
+            gmsh.model.occ.addCylinder(self.r3[0]+self.q[0]*-0.5*shroud_length,
+                                       self.r3[1]+self.q[1]*-0.5*shroud_length, 
+                                       self.r3[2]+self.q[2]*-0.5*shroud_length, 
+                                       self.q[0]*shroud_length, 
+                                       self.q[1]*shroud_length, 
+                                       self.q[2]*shroud_length, 
+                                       shroud_radius)
+
+            gmsh.model.occ.synchronize()
+            gmsh.model.occ.mesh.setSize(gmsh.model.getBoundary([(3,4)], recursive=True), shroud_radius*constraint)
+            gmsh.option.setNumber("Mesh.MeshSizeMax", mesh_size_max)
+            gmsh.model.occ.fuse([(3,1),(3,2),(3,3)], [(3, 4)])
+
+        # def test():
+
+        #     pts_test = []
+        #     pts_test.append(gmsh.model.occ.addPoint(self.r3[0], self.r3[1], self.r3[2]))
+
+        #     r_b = np.array([-self.ccblade.precurve[-1], self.ccblade.presweep[-1], self.ccblade.r[-1]+self.Rhub])
+            
+        #     R = rotationMatrix(np.deg2rad(self.azimuths[0]), -cone[-1], -self.ccblade.theta[-1])  
+        #     r_blade_0 = np.matmul(self.R_q, np.matmul(R, r_b)) 
+        #     r_blade_0 = np.array([r_blade_0[0]+self.r3[0], r_blade_0[1]+self.r3[1], r_blade_0[2]+self.r3[2]])
+
+        #     R = rotationMatrix(np.deg2rad(self.azimuths[1]), -cone[-1], -self.ccblade.theta[-1])
+        #     r_blade_1 = np.matmul(self.R_q, np.matmul(R, r_b))
+        #     r_blade_1 = np.array([r_blade_1[0]+self.r3[0], r_blade_1[1]+self.r3[1], r_blade_1[2]+self.r3[2]])
+
+        #     R = rotationMatrix(np.deg2rad(self.azimuths[2]), -cone[-1], -self.ccblade.theta[-1])
+        #     r_blade_2 = np.matmul(self.R_q, np.matmul(R, r_b))
+        #     r_blade_2 = np.array([r_blade_2[0]+self.r3[0], r_blade_2[1]+self.r3[1], r_blade_2[2]+self.r3[2]])
+
+        #     q_blade = self.q*63
+
+        #     pts_test.append(gmsh.model.occ.addPoint(r_blade_0[0], r_blade_0[1], r_blade_0[2]))
+        #     pts_test.append(gmsh.model.occ.addPoint(r_blade_1[0], r_blade_1[1], r_blade_1[2]))
+        #     pts_test.append(gmsh.model.occ.addPoint(r_blade_2[0], r_blade_2[1], r_blade_2[2]))
+        #     pts_test.append(gmsh.model.occ.addPoint(q_blade[0]+self.r3[0], q_blade[1]+self.r3[1], q_blade[2]+self.r3[2]))
+
+        #     gmsh.model.occ.addLine(pts_test[0], pts_test[1])
+        #     gmsh.model.occ.addLine(pts_test[0], pts_test[2])
+        #     gmsh.model.occ.addLine(pts_test[0], pts_test[3])
+        #     gmsh.model.occ.addLine(pts_test[0], pts_test[4])
+
+        # test()
+
+        gmsh.model.occ.synchronize()
+        surf_list = gmsh.model.getEntities(2)
+        surf = [i[1] for i in surf_list]
+
+        if all is True:
+            gmsh.model.addPhysicalGroup(2, surf, 2, "rotor")
+        else:
+            gmsh.model.addPhysicalGroup(2, surf, 2, "blade")
+            
+        if mesh is True:
+            gmsh.option.setNumber('Mesh.Smoothing', 5)
+            gmsh.option.setNumber('Mesh.SmoothNormals', 1)
+            gmsh.model.mesh.generate(2)
+            # gmsh.model.mesh.optimize()
+        
+        if vtk_show is True:
+            
+            nodes, coords, _ = gmsh.model.mesh.getNodes()
+            nodes, coords, _ = gmsh.model.mesh.getNodes()
+            elementType, elements, elementNodes = gmsh.model.mesh.getElements()
+
+            nVertices = len(nodes)
+            vertices = np.array(coords).reshape(nVertices, 3)
+
+            if len(elementType[1:-1]) == 2: # triangular and quadature faces
+                nTriFaces    = elements[1].shape[0]
+                nQuadFaces   = elements[2].shape[0]
+
+                faces_ = np.array(elementNodes[1]-1).reshape(nTriFaces ,3)
+                triFaces = np.hstack((faces_, faces_[:, [0]]))
+
+                quadFaces = np.array(elementNodes[2]-1).reshape(nQuadFaces ,4)
+
+                faces = np.asarray(np.vstack((triFaces, quadFaces)))
+
+            elif len(elementType[1:-1]) == 1 and elementType[1] == 2: # all triangular faces
+                nFaces = elements[1].shape[0]
+
+                faces_ = np.array(elementNodes[1]-1).reshape(nFaces ,3)
+                faces = np.hstack((faces_, faces_[:, [0]]))
+
+            elif len(elementType[1:-1]) == 1 and elementType[1] == 3: # all rectangular faces
+                nFaces = elements[1].shape[0]
+
+                faces = np.array(elementNodes[1]-1).reshape(nFaces ,4)
+
+            from meshmagick.mesh import Mesh
+
+            vtk_mesh = Mesh(vertices ,faces, name="rotor")
+            vtk_mesh.show()
+
+        if show is True:
+            gmsh.fltk.run()
+
+        if save is True:
+            gmsh.option.setNumber('Mesh.Format', 1)
+            gmsh.option.setNumber("Mesh.MshFileVersion", 2.2)
+            gmsh.option.setNumber("Mesh.SaveParametric", 0)
+
+            gmsh.write(meshFile)
+
+        gmsh.finalize()
 
 if __name__=='__main__':
-    fname_design = os.path.join(raft_dir,'designs/VolturnUS-S.yaml')
+    # fname_design = os.path.join(raft_dir,'designs/VolturnUS-S.yaml')
+    fname_design = os.path.join(raft_dir,'designs/OC4semi.yaml')
 
     # open the design YAML file and parse it into a dictionary for passing to raft
     with open(fname_design) as file:
@@ -1299,6 +1793,8 @@ if __name__=='__main__':
 
     # make Rotor object
     rotor = Rotor(design['turbine'], ws, 0)    
+
+    # rotor.setPosition(r6=[0,0,-2,0,0,0])
     
     
     
@@ -1333,8 +1829,8 @@ if __name__=='__main__':
 
         rgba = cmapper((i_case+1)/8)
 
-        ax[0,0].plot(ws/2.0/np.pi, a_aero[4, 4, :]     , color=rgba, label=f"U = {UU[i_case]:2.0f} m/s")
-        ax[1,0].plot(ws/2.0/np.pi, b_aero[4, 4, :]     , color=rgba, label=f"U = {UU[i_case]:2.0f} m/s")
+        ax[0,0].plot(ws/2.0/np.pi, a_aero[0, 0, :]     , color=rgba, label=f"U = {UU[i_case]:2.0f} m/s")
+        ax[1,0].plot(ws/2.0/np.pi, b_aero[0, 0, :]     , color=rgba, label=f"U = {UU[i_case]:2.0f} m/s")
         ax[0,1].plot(ws/2.0/np.pi, np.real(rotor.c_exc), color=rgba)
         ax[0,1].plot(ws/2.0/np.pi, np.imag(rotor.c_exc), color=rgba, ls=":") 
         ax[1,1].plot(ws/2.0/np.pi, rotor.V_w           , color=rgba, label=f"U = {UU[i_case]:2.0f} m/s")
