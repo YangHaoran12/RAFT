@@ -6,7 +6,7 @@ members:   # list all members here
     
   - name      :  ellipse                   # [-]    an identifier (no longer has to be number)       
     type      :  2                         # [-]
-    dlsMax    :  0.1                       # maximum node splitting section amount for platform members; can't be 0
+    dlsMax    :  1                       # maximum node splitting section amount for platform members; can't be 0
     rA        :  [ 0, 0, -20]              # [m]    end A coordinates
     rB        :  [ 0, 0,  15]              # [m]    and B coordinates
     shape     :  ellipse                   # [-]    circular or rectangular
@@ -23,5 +23,5 @@ members:   # list all members here
     CaEnd     :  0.7                       # [-]    end axial added mass coefficient  (optional, scalar or list of same length as stations)
     rho_shell :  7850                      # [kg/m3]
     # --- ballast ---
-    l_fill    :  6.19                      
-    rho_fill  :  5000                      # [kg/m3]
+    l_fill    :  0                      
+    rho_fill  :  0                      # [kg/m3]

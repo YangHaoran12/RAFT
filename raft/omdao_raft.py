@@ -316,7 +316,7 @@ class RAFT_OMDAO(om.ExplicitComponent):
 
         # Aggregate outputs
         self.add_output('Max_Offset', val = 0, desc = 'Maximum distance in surge/sway direction', units = 'm') 
-        self.add_output('heave_avg', val = 0, desc = 'Average heave over all cases', units = 'm') 
+        self.add_output('heave_avg',  val = 0, desc = 'Average heave over all cases', units = 'm') 
         self.add_output('Max_PtfmPitch', val = 0, desc = 'Maximum platform pitch over all cases', units = 'deg') 
         self.add_output('Std_PtfmPitch', val = 0, desc = 'Average platform pitch std. over all cases', units = 'deg') 
         self.add_output('max_nac_accel', val = 0, desc = 'Maximum nacelle accelleration over all cases', units = 'm/s**2') 

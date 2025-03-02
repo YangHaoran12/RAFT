@@ -18,7 +18,7 @@ site:
 cases:
     keys : [wind_speed, wind_heading, turbulence, turbine_status, yaw_misalign, wave_spectrum, wave_period, wave_height, wave_heading  ]
     data :  #   m/s        deg    % or e.g. 2B_NTM    string            deg         string          (s)         (m)         (deg)
-        -  [    12,         45,            0.01,       operating,          0,        JONSWAP,         13.1,        8.5,           0        ]
+        -  [    8,         0,            0.01,       operating,          0,        JONSWAP,         12,        6,           0        ]
         # -  [    12,         0,            0.01,       operating,          0,        JONSWAP,         13.1,        8.5,           30        ]
 
 turbine:
@@ -39,7 +39,7 @@ turbine:
     precone     : 4.0     # [deg]
     shaft_tilt  : 6.0     # [deg]
     overhang    : -12.0313 # [m]
-    aeroServoMod : 2          # 0 aerodynamics off; 1 aerodynamics on (no control); 2 aerodynamics and control on
+    aeroServoMod : 1          # 0 aerodynamics off; 1 aerodynamics on (no control); 2 aerodynamics and control on
     
     blade: 
         precurveTip : -3.9999999999999964  # 
@@ -1069,7 +1069,7 @@ turbine:
         stations  :  [ 15,  28,  28.001,  41,  41.001,  54,  54.001,  67,  67.001,  80,  80.001,  93,  93.001,  106,  106.001,  119,  119.001,  132,  132.001,  144.582 ]    # [-]    location of stations along axis. Will be normalized such that start value maps to rA and end value to rB
         d         :  [ 10,  9.964,  9.964,  9.967,  9.967,  9.927,  9.927,  9.528,  9.528,  9.149,  9.149,  8.945,  8.945,  8.735,  8.735,  8.405,  8.405,  7.321,  7.321,  6.5 ]    # [m]    diameters if circular or side lengths if rectangular (can be pairs)
         t         :  [ 0.082954,  0.082954,  0.083073,  0.083073,  0.082799,  0.082799,  0.0299,  0.0299,  0.027842,  0.027842,  0.025567,  0.025567,  0.022854,  0.022854,  0.02025,  0.02025,  0.018339,  0.018339,  0.021211,  0.021211 ]                     # [m]    wall thicknesses (scalar or list of same length as stations)
-        Cd        :  0.0                       # [-]    transverse drag coefficient       (optional, scalar or list of same length as stations)
+        Cd        :  0.5                       # [-]    transverse drag coefficient       (optional, scalar or list of same length as stations)
         Ca        :  0.0                       # [-]    transverse added mass coefficient (optional, scalar or list of same length as stations)
         # (neglecting axial coefficients for now)
         CdEnd     :  0.0                       # [-]    end axial drag coefficient        (optional, scalar or list of same length as stations)
@@ -1089,7 +1089,7 @@ platform:
     dlsMax       :  5.0     # maximum node splitting section amount for platform members; can't be 0
     potFirstOrder:   1
     potSecondOrder:  0
-    hydroPath    :  'BEM/VolturnUS-S/platform'
+    hydroPath    :  'BEM/VolturnUS-S-WAMIT/platform'
     members:   # list all members here
         
       - name      :  center_column             # [-]    an identifier (no longer has to be number)       
@@ -1142,10 +1142,10 @@ platform:
         
       - name      :  pontoon                   # [-]    an identifier (no longer has to be number)       
         type      :  2                         # [-]    
-        # rA        :  [  5  , 0, -16.5]         # [m]    end A coordinates
-        # rB        :  [ 45.5, 0, -16.5]         # [m]    and B coordinates
-        rA        :  [  0  , 0, -16.5]
-        rB        :  [  51.75  , 0, -16.5]
+        rA        :  [  5  , 0, -16.5]         # [m]    end A coordinates
+        rB        :  [ 45.5, 0, -16.5]         # [m]    and B coordinates
+        # rA        :  [  0  , 0, -16.5]
+        # rB        :  [  51.75  , 0, -16.5]
         heading   :  [ 60, 180, 300]           # [deg]  heading rotation of column about z axis (for repeated members)
         shape     :  rect                      # [-]    circular or rectangular
         gamma     :  0.0                       # [deg]  twist angle about the member's z-axis

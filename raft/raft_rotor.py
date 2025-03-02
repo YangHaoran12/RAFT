@@ -278,7 +278,7 @@ class Rotor:
 
 
         # Set discretization parameters
-        nSector = getFromDict(turbine['blade'][ir], 'nSector', default=8) # number of equally spaced azimuthal positions for CCblade to compute and average over
+        nSector = getFromDict(turbine['blade'][ir], 'nSector', default=4) # number of equally spaced azimuthal positions for CCblade to compute and average over
         nr = getFromDict(turbine['blade'][ir], 'nr', dtype=int, default=20) # number of radial blade stations (or blade elements) to use
         
         grid = np.linspace(0., 1., nr, endpoint=False) + 0.5/nr # equally spaced grid along blade span, root=0 tip=1
@@ -344,14 +344,14 @@ class Rotor:
                 cl  = station_polar[af_flag].cl
                 cd  = station_polar[af_flag].cd
                 cm  = station_polar[af_flag].cm
-                af.append(CCAirfoil(aoa, [Re], cl, cd, cm, AFName=station_airfoil[af_flag]))
+                af.append(CCAirfoil(aoa, [Re], cl, cd, cm, AFName=station_airfoil[af_flag+1]))
             elif grid[i] > station_position[af_flag+1]:
                 aoa = station_polar[af_flag+1].alpha
                 Re  = station_polar[af_flag+1].Re
                 cl  = station_polar[af_flag+1].cl
                 cd  = station_polar[af_flag+1].cd
                 cm  = station_polar[af_flag+1].cm
-                af.append(CCAirfoil(aoa, [Re], cl, cd, cm, AFName=station_airfoil[af_flag+1]))
+                af.append(CCAirfoil(aoa, [Re], cl, cd, cm, AFName=station_airfoil[af_flag+2]))
 
             if grid[i+1] > station_position[af_flag+1]:
                 af_flag += 1
@@ -1397,7 +1397,7 @@ class Rotor:
         return U, V, W, Rot
     
 
-    def baldeGeo2Mesh(self, 
+    def bladeGeo2Mesh(self, 
                       geometry_table=np.ndarray, 
                       pitch=0., # deg
                       constraint=0.1,
@@ -1473,7 +1473,7 @@ class Rotor:
         # gmsh.option.setNumber("Mesh.MeshSizeFromCurvatureIsotropic", 1)
         # gmsh.model.occ.synchronize()
         # gmsh.fltk.run()
-        gmsh.model.occ.addThruSections(curve_loop, continuity="C2")
+        gmsh.model.occ.addThruSections(curve_loop, continuity="G2")
         gmsh.model.occ.synchronize()
         # gmsh.fltk.run()
         
@@ -1514,7 +1514,7 @@ class Rotor:
         if mesh is True:
             gmsh.option.setNumber('Mesh.Smoothing', 5)
             gmsh.option.setNumber('Mesh.SmoothNormals', 1)
-            # gmsh.option.setNumber('Mesh.MeshSizeFromCurvature', 5)
+            # gmsh.option.setNumber('Mesh.MeshSizeFromCurvature', 1)
             gmsh.model.mesh.generate(2)
         
         if show is True:
@@ -1770,6 +1770,68 @@ class Rotor:
 
         gmsh.finalize()
 
+    def bladdeGeo2AbsPts(self, 
+                         geometry_table=np.ndarray, 
+                         pitch=0., # deg 
+                         meshDir=os.path.join(raft_dir, "blade_mesh/blade.msh")
+                      ):
+        '''A function to create RAFT BladeMembers based on rotor blades (Yang currently used). 
+        slightly different from the original version bladeGeometry2Member
+
+        Method to create members for each "node" that is specified in turbine['blade']['geometry']
+        To be used for added mass and buoyancy calculations of underwater turbines'''
+
+        from raft.helpers import inerpStr
+
+        if geometry_table.shape[1] == 6:
+            pitch_axis = geometry_table[:,5]
+        else:
+            pitch_axis = np.ones_like(geometry_table[:, 0]) * 0.25
+        
+
+        af_name = [af.AFName for af in self.ccblade.af]
+        af_list = inerpStr(geometry_table[:, 0], self.ccblade.r, af_name)
+
+        curve_loop = []
+
+        for i in range(len(geometry_table[:, 0])):
+                  
+            af_file = os.path.join(raft_dir, f"designs/airfoil/coordinate/{af_list[i]}.txt")
+            output_file = os.path.join(meshDir, f"Section_{i}.dat")
+            
+            coord = readCoordinate(af_file)
+
+            if coord[0, 1] == coord[-1, 1]:
+                print(f"Warnig: y coordinate of coord[0, 1] and coord[-1, 1] should not be the same, both will be deleted")
+                coord = coord[1:-1]
+
+            rpts = []
+
+            n_p = coord.shape[0]  # number of points in airfoil coordinate file
+            r_b = np.array([geometry_table[i, 3], geometry_table[i, 4], geometry_table[i, 0]])     # airfoil center in coordinates in blade-aligned coordinate system
+
+            R = rotationMatrix(np.deg2rad(self.azimuths[0]), -np.deg2rad(self.precone), -np.deg2rad(geometry_table[i, 2]-pitch))    # R_z(-twist-pitch) -> R_y(-cone) -> R_x(azimuth) 
+            
+            with open(output_file, 'w') as file:
+                # file.write("x    y    z\n")
+                
+                for j in range(n_p):
+
+                    x = coord[j, 1] * geometry_table[i, 1] + r_b[0]    # x coordinate in blade-aligned coordinate system
+                    y = (coord[j, 0]-pitch_axis[i]) * geometry_table[i, 1] + r_b[1]    # y coordinate in blade-aligned coordinate system
+                    z = r_b[2]                                          # z coordinate in blade-aligned coordinate system
+
+                    rpts_rel = np.matmul(self.R_q, np.matmul(R, np.array([x,y,z])))
+                        
+                    file.write("".join([f"{(rpts_rel[i]+self.r3[i])*1e3:15.6f}" for i in range(3)]))
+                    file.write("\n")
+
+                            # file.write(f"{rpts_rel[0]+self.r3[0]}  ")
+                            # rpts.append( rpts_rel[0]+self.r3[0], 
+                            #      rpts_rel[1]+self.r3[1], 
+                            #      rpts_rel[2]+self.r3[2], 
+                            #     )
+            file.close()
 if __name__=='__main__':
     # fname_design = os.path.join(raft_dir,'designs/VolturnUS-S.yaml')
     fname_design = os.path.join(raft_dir,'designs/OC4semi.yaml')

@@ -1,7 +1,10 @@
-from raft.raft_member_yang import Member
+from raft.raft_member import Member, TowerMember
+from raft.raft_rotor import raft_dir
 import yaml
 import matplotlib.pyplot as plt
 import numpy as np
+
+import os
 
 list_files = [
     'mem_srf_vert_circ_cyl.yaml',    
@@ -14,9 +17,10 @@ list_files = [
     'mem_subm_horz_rect_cyl.yaml',
     'mem_srf_vert_tap_circ_cyl.yaml',
     'mem_srf_vert_tap_rect_cyl.yaml',
+    'mem_srf_vert_ellipse_cyl.yaml'
     ]
 
-fname_design = f"tests/test_data/{list_files[2]}"
+fname_design = os.path.join(raft_dir, f"tests/test_data/{list_files[-1]}")
 
 with open(fname_design) as file:
     design = yaml.load(file, Loader=yaml.FullLoader)
@@ -26,11 +30,39 @@ dict = design["members"][0]
 
 mem = Member(dict, 1)
 
-# mem.setPosition(r6=[1,1,0,0.01*np.pi,0.01*np.pi,0])
+Surge = 0   #[m]
+Sway  = 0   #[m]
+Heave = 0  #[m]
+Roll  = 0   #[deg]
+Pitch = 0   #[deg]
+Yaw   = 0   #[deg]
+
+r6=[Surge, Sway, Heave, np.deg2rad(Roll), np.deg2rad(Pitch), np.deg2rad(Yaw)]
+
 mem.setPosition()
-r1 = mem.getHydrostatics()
-r2 = mem.getHydrostaticsYang()
+r1 = mem.getHydrostaticsOld()
+r2 = mem.getHydrostatics()
 r3 = mem.getHydrostaticsFromMesh()
+
+ax = plt.figure().add_subplot(projection='3d')
+
+from tabulate import tabulate
+
+print(tabulate(r1[1], headers=["x", "y", "z", "xx", "yy", "zz"], floatfmt=".3f"))
+print(tabulate(r2[1], headers=["x", "y", "z", "xx", "yy", "zz"], floatfmt=".3f"))
+print(tabulate(r3[1], headers=["x", "y", "z", "xx", "yy", "zz"], floatfmt=".3f"))
+print('-------Fvec---------')
+print(tabulate(np.array([r1[0],r2[0],r3[0]]).T, headers=["Orig", "Modify", "Gmsh"], floatfmt=".3f"))
+print('--------r_center----------')
+print(tabulate(np.array([r1[3],r2[3],r3[3]]).T, headers=["Orig", "Modify", "Gmsh"], floatfmt=".3f"))
+mem.plot(ax)
+print('-----------------------------------')
+
+mem.setPosition(r6)
+r1 = mem.getHydrostaticsOld(r6[:3])
+r2 = mem.getHydrostatics(r6[:3])
+r3 = mem.getHydrostaticsFromMesh(r6[:3])
+
 
 from tabulate import tabulate
 
@@ -38,69 +70,13 @@ print(tabulate(r1[1], headers=["x", "y", "z", "xx", "yy", "zz"], floatfmt=".3f")
 print(tabulate(r2[1], headers=["x", "y", "z", "xx", "yy", "zz"], floatfmt=".3f"))
 print(tabulate(r3[1], headers=["x", "y", "z", "xx", "yy", "zz"], floatfmt=".3f"))
 
+print('-------Fvec---------')
 print(tabulate(np.array([r1[0],r2[0],r3[0]]).T, headers=["Orig", "Modify", "Gmsh"], floatfmt=".3f"))
-print('--------------------')
-print(r1[3])
-print(r2[3])
-print(r3[3])
-
-mem.setPosition([0,0,0,np.deg2rad(2),np.deg2rad(2),np.deg2rad(5)])
-r1 = mem.getHydrostatics()
-r2 = mem.getHydrostaticsYang()
-r3 = mem.getHydrostaticsFromMesh()
-
-from tabulate import tabulate
-
-print(tabulate(r1[1], headers=["x", "y", "z", "xx", "yy", "zz"], floatfmt=".3f"))
-print(tabulate(r2[1], headers=["x", "y", "z", "xx", "yy", "zz"], floatfmt=".3f"))
-print(tabulate(r3[1], headers=["x", "y", "z", "xx", "yy", "zz"], floatfmt=".3f"))
-
-print(tabulate(np.array([r1[0],r2[0],r3[0]]).T, headers=["Orig", "Modify", "Gmsh"], floatfmt=".3f"))
-
-print('--------------------')
-print(r1[3])
-print(r2[3])
-print(r3[3])
-
-# print(tabulate(np.array([r1[0],r2[0],r3[0]]).T, headers=["Orig", "Modify", "Gmsh"], floatfmt=".3f"))
-
-mem_list = []
-
-mem_list.append(Member(dict,1, heading=60))
-mem_list.append(Member(dict,1, heading=180))
-mem_list.append(Member(dict,1, heading=300))
-
-Fvec = np.zeros(6)
-for mem in mem_list:
-    mem.setPosition()
-    Fvec += mem.getHydrostaticsFromMesh()[0]
-
-
-print(tabulate(np.array([r1[0],r2[0],r3[0], Fvec]).T, headers=["Orig", "Modify", "Gmsh", "All"], floatfmt=".3f"))
-
-print(f"original method: \n Awp={r1[4]}")
-print(f"modified method: \n Awp={r2[4]}")
-print(f"modified method: \n Awp={r3[4]}")
-
-print(f"original method: \n Iwp={r1[5]}")
-print(f"modified method: \n Iwp={r2[5]}")
-print(f"modified method: \n Awp={r3[5]}")
-
-print(f"original method: \n Fvec={r1[0]}")
-print(f"modified method: \n Fvec={r2[0]}")
-print(f"modified method: \n Fvec={r3[0]}")
-
-
-mem.getInertia()
-
-M_struc, mass, center = mem.getMemberInertia()
-
-print(f"Mass matrix: \n {M_struc}")
-print(f"Mass       : \n {mass}")
-print(f"Center     : \n {center}")
-
-
-fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
-mem.plotSurface(ax, nodes=2)
-
+print('--------r_center----------')
+print(tabulate(np.array([r1[3],r2[3],r3[3]]).T, headers=["Orig", "Modify", "Gmsh"], floatfmt=".3f"))
+mem.plot(ax)
+plt.axis('equal') 
 plt.show()
+
+
+

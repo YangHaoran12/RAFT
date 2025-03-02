@@ -19,8 +19,9 @@ cases:
     keys : [wind_speed, wind_heading, turbulence, turbine_status, yaw_misalign, wave_spectrum, wave_period, wave_height, wave_heading  ]
     data :  #   m/s        deg    % or e.g. 2B_NTM    string            deg         string          (s)         (m)         (deg)
         # -  [    12,         0,            0.01,       operating,          0,        JONSWAP,         13.1,        8.5,           0        ]
+        -  [    8,         0,            0.01,       operating,          0,        JONSWAP,         13.1,        8.5,           0        ]
+        -  [    8,         0,            0.01,       operating,          0,        JONSWAP,         12.0,        6.0,           0        ]
         # -  [    12,         30,            0.01,       operating,          0,        JONSWAP,         13.1,        8.5,           0        ]
-        -  [    12,         45,            0.01,       operating,          0,        JONSWAP,         13.1,        8.5,           0        ]
 
 
 turbine:
@@ -1043,7 +1044,7 @@ turbine:
         stations  :  [ 10, 17.76, 25.52, 33.28, 41.04, 48.8, 56.56, 64.32, 72.08, 79.84, 87.6 ]    # [-]    location of stations along axis. Will be normalized such that start value maps to rA and end value to rB
         d         :  [ 6.5, 6.237, 5.974, 5.711, 5.448, 5.185, 4.922, 4.659, 4.396, 4.133, 3.870 ]    # [m]    diameters if circular or side lengths if rectangular (can be pairs)
         t         :  [ 0.027, 0.0262, 0.0254, 0.0246, 0.0238, 0.023, 0.0222, 0.0214, 0.0206, 0.0198, 0.0190 ]                     # [m]    wall thicknesses (scalar or list of same length as stations)
-        Cd        :  0.0                       # [-]    transverse drag coefficient       (optional, scalar or list of same length as stations)
+        Cd        :  0.5                       # [-]    transverse drag coefficient       (optional, scalar or list of same length as stations)
         Ca        :  0.0                       # [-]    transverse added mass coefficient (optional, scalar or list of same length as stations)
         # (neglecting axial coefficients for now)
         CdEnd     :  0.0                       # [-]    end axial drag coefficient        (optional, scalar or list of same length as stations)
@@ -1068,7 +1069,7 @@ platform:
     da_BEM       : 2.0    #  [m]   azimuthal discretization panel length target for BEM analysis
     potModMaster : 3
     potFirstOrder: 1
-    hydroPath    : 'BEM/OC4/platform'
+    hydroPath    : 'BEM/OC4-semi-WAMIT/platform'
     
     members:   # list all members here
         

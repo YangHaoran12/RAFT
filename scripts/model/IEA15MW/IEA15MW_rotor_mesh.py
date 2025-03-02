@@ -1,9 +1,9 @@
 import yaml
-from raft.raft_rotor_yang import Rotor, raft_dir
+from raft.raft_rotor import Rotor, raft_dir
 import numpy as np
 import os
 
-fname_design = os.path.join(raft_dir, "examples/VolturnUS-S_example.yaml")
+fname_design = os.path.join(raft_dir, "examples/VolturnUS-S_example_copy.yaml")
 # fname_design ="examples/OC4semi-RAFT_QTF.yaml"
 
 with open(fname_design) as file:
@@ -28,13 +28,19 @@ meshFile = os.path.join(raft_dir, "models/msh/IEA-15MW-rotor.msh")
 
 # geometry_table[:, 3] = -geometry_table[:, 3]
 
-rotor.baldeGeo2Mesh(geometry_table, 
+rotor.bladeGeo2Mesh(geometry_table, 
+                    pitch=2.82,
                     show=True, 
                     all=True, 
-                    mesh=True, 
-                    vtk_show=True, 
+                    mesh=False, 
+                    vtk_show=False, 
                     meshFile=meshFile, 
-                    shroud_radius=6, 
-                    save=True,
-                    constraint=0.05)
+                    mesh_size_max=0.2,
+                    shroud_radius=5.0, 
+                    save=False,
+                    constraint=0.025)
 
+meshDir = os.path.join(raft_dir, "temp")
+rotor.bladdeGeo2AbsPts(geometry_table, pitch=0, meshDir=meshDir)
+
+a = 1

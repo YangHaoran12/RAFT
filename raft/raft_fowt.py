@@ -213,7 +213,7 @@ class FOWT():
         # mean weight and hydro force arrays are set elsewhere. In future hydro could include current.
         self.D_hydro = np.zeros(6)      # initialize mean drag force from current - acts as a "static" force, like f_aero0
         # mean tower aero force arrays
-        self.F_tower_aero = np.zeros(6)      # initialize mean drag force acting on tower from wind - acts as a "static" force, like f_aero0
+        self.F_tower_aero = np.zeros([6, self.nrotors])      # initialize mean drag force acting on tower from wind - acts as a "static" force, like f_aero0
         # flag to signal whether any members will be modeled with BEM
         self.potMod = any([member['potMod']==True for member in design['platform']['members'] ])
 
@@ -353,7 +353,8 @@ class FOWT():
 
             # ---------------------- get member's mass and inertia properties ------------------------------
             # get member mass and inertia info (including mem.M_struc) <<< still split between converting to PRP in or out of these functions
-            mass, center, m_shell, mfill, pfill = mem.getInertia(rPRP=self.r6[:3]) 
+            # mass, center, m_shell, mfill, pfill = mem.getInertia(rPRP=self.r6[:3]) 
+            mass, center, m_shell, mfill, pfill = mem.getInertiaOpt(rPRP=self.r6[:3])
 
             # Calculate the mass matrix of the FOWT about the PRP
             self.W_struc += translateForce3to6DOF( np.array([0,0, -g*mass]), center )  # weight vector
@@ -1653,69 +1654,70 @@ class FOWT():
         rho = 1.225
         g   = self.g
 
-        F_tower_aero = np.zeros(6)      # create variable to hold the total drag force
+        F_tower_aero = np.zeros([6, self.nrotors])      # create variable to hold the total drag force
 
         # extract current variables out of the case dictionary
         speed = getFromDict(case, 'wind_speed', shape=0, default=0.0)
         heading = getFromDict(case, 'wind_heading', shape=0, default=0)
 
-        hHub = self.rotorList[0].hHub
-        for mem in self.memberList:
+        for ir in range(self.nrotors):
+            hHub = self.rotorList[ir].hHub
+            for mem in self.memberList:
 
-            circ = mem.shape=='circular'  # convenience boolian for circular vs. rectangular cross sections
-            if type(mem) is TowerMember:
-            # loop through each node of the member
-                for il in range(mem.ns):
+                circ = mem.shape=='circular'  # convenience boolian for circular vs. rectangular cross sections
+                if type(mem) is TowerMember:
+                # loop through each node of the member
+                    for il in range(mem.ns):
 
-                    # only process hydrodynamics if this node is submerged
-                    if mem.r[il,2] > 0:
+                        # only process hydrodynamics if this node is submerged
+                        if mem.r[il,2] > 0:
 
-                        # calculate current velocity as a function of node depth [x,y,z] (assumes no vertical current velocity)
-                        v = speed * (mem.r[il,2]/hHub)**self.shearExp_air
-                        #v = speed
-                        vcur = np.array([v*np.cos(np.deg2rad(heading)), v*np.sin(np.deg2rad(heading)), 0])
+                            # calculate current velocity as a function of node depth [x,y,z] (assumes no vertical current velocity)
+                            v = speed * (mem.r[il,2]/hHub)**self.shearExp_air
+                            #v = speed
+                            vcur = np.array([v*np.cos(np.deg2rad(heading)), v*np.sin(np.deg2rad(heading)), 0])
 
-                        # interpolate coefficients for the current strip
-                        Cd_p1  = np.interp( mem.ls[il], mem.stations, mem.Cd_p1 )
-                        Cd_p2  = 0.0   # a fix lift coefficient, equals 0 in most conditions, so force it to be 0 now
-                        # Cd_End = np.interp( mem.ls[il], mem.stations, mem.Cd_End)
+                            # interpolate coefficients for the current strip
+                            Cd_p1  = np.interp( mem.ls[il], mem.stations, mem.Cd_p1 )
+                            Cd_p2  = np.interp( mem.ls[il], mem.stations, mem.Cd_p2 )
+                            # Cd_End = np.interp( mem.ls[il], mem.stations, mem.Cd_End)
 
-                        # current (relative) velocity over node (no complex numbers bc not function of frequency)
-                        vrel = np.array(vcur)
-                        # break out velocity components in each direction relative to member orientation
-                        vrel_q  = np.inner(vrel, mem.q )*mem.q[:]
-                        vrel_p  = vrel-vrel_q 
-                        vrel_p1 = np.inner(vrel, mem.p1)*mem.p1[:]
-                        vrel_p2 = np.inner(vrel, mem.p2)*mem.p2[:]  
+                            # current (relative) velocity over node (no complex numbers bc not function of frequency)
+                            vrel = np.array(vcur)
+                            # break out velocity components in each direction relative to member orientation
+                            vrel_q  = np.inner(vrel, mem.q )*mem.q[:]
+                            vrel_p  = vrel-vrel_q 
+                            vrel_p1 = np.inner(vrel, mem.p1)*mem.p1[:]
+                            vrel_p2 = np.inner(vrel, mem.p2)*mem.p2[:]  
 
-                        # ----- compute side effects ------------------------
+                            # ----- compute side effects ------------------------
 
-                        # member acting area assigned to this node in each direction
-                        # a_i_q  = np.pi*mem.ds[il]*mem.dls[il]  if circ else  2*(mem.ds[il,0]+mem.ds[il,0])*mem.dls[il]
-                        a_i_p1 =       mem.ds[il]*mem.dls[il]  if circ else             mem.ds[il,0]      *mem.dls[il]
-                        a_i_p2 =       mem.ds[il]*mem.dls[il]  if circ else             mem.ds[il,1]      *mem.dls[il]
+                            # member acting area assigned to this node in each direction
+                            # a_i_q  = np.pi*mem.ds[il]*mem.dls[il]  if circ else  2*(mem.ds[il,0]+mem.ds[il,0])*mem.dls[il]
+                            a_i_p1 =       mem.ds[il]*mem.dls[il]  if circ else             mem.ds[il,0]      *mem.dls[il]
+                            a_i_p2 =       mem.ds[il]*mem.dls[il]  if circ else             mem.ds[il,1]      *mem.dls[il]
 
-                        # calculate drag force wrt to each orientation using simple Morison's drag equation
-                        # Dq = 0.5 * rho * a_i_q * Cd_q * np.linalg.norm(vrel_q) * vrel_q
+                            # calculate drag force wrt to each orientation using simple Morison's drag equation
+                            # Dq = 0.5 * rho * a_i_q * Cd_q * np.linalg.norm(vrel_q) * vrel_q
 
-                        if circ: # Use the norm of the total perpendicular relative velocity
-                            normVrel_p1 = np.linalg.norm(vrel_p)
-                            normVrel_p2 = normVrel_p1
-                        else: # Otherwise treat each direction separately
-                            normVrel_p1 = np.linalg.norm(vrel_p1)
-                            normVrel_p2 = np.linalg.norm(vrel_p2)
-                        Dp1 = 0.5 * rho * a_i_p1 * Cd_p1 * normVrel_p1 * vrel_p1
-                        Dp2 = 0.5 * rho * a_i_p2 * Cd_p2 * normVrel_p2 * vrel_p2
+                            if circ: # Use the norm of the total perpendicular relative velocity
+                                normVrel_p1 = np.linalg.norm(vrel_p)
+                                normVrel_p2 = normVrel_p1
+                            else: # Otherwise treat each direction separately
+                                normVrel_p1 = np.linalg.norm(vrel_p1)
+                                normVrel_p2 = np.linalg.norm(vrel_p2)
+                            Dp1 = 0.5 * rho * a_i_p1 * Cd_p1 * normVrel_p1 * vrel_p1
+                            Dp2 = 0.5 * rho * a_i_p2 * Cd_p2 * normVrel_p2 * vrel_p2
 
-                        # ----- sum forces and add to total mean drag load about PRP ------
-                        D =  Dp1 + Dp2     # sum drag forces at node in member's local orientation frame
+                            # ----- sum forces and add to total mean drag load about PRP ------
+                            D =  Dp1 + Dp2     # sum drag forces at node in member's local orientation frame
 
-                        mem.F_aero = D
-                        F_tower_aero += translateForce3to6DOF(D, mem.r[il,:] - self.r6[:3])  # sum as forces and moments about PRP
+                            mem.F_aero = D
+                            F_tower_aero[:, ir] += translateForce3to6DOF(D, mem.r[il,:] - self.r6[:3])  # sum as forces and moments about PRP
                     
         self.F_tower_aero = F_tower_aero  # save hydro drag forces/moments to FOWT for later access
 
-        return F_tower_aero
+        return np.sum(F_tower_aero, axis=0)
 
 
     def calcQTF_slenderBody(self, waveHeadInd, Xi0=None, verbose=False, iCase=None, iWT=None):
@@ -2308,6 +2310,7 @@ class FOWT():
         XiArm = np.zeros_like(XiHub, dtype=np.complex128)
         
         aCG_turbine = np.zeros_like(XiHub, dtype=complex)
+        aArm =  np.zeros_like(XiHub, dtype=complex)
         '''ICG_turbine = np.zeros_like(m_turbine)'''
         ICG_turbine = np.zeros([self.nrotors, 3, 3])
         M_I            = np.zeros_like(XiHub)
@@ -2355,10 +2358,16 @@ class FOWT():
             '''aCG_turbine[:,ir,:] = -self.w**2 *( self.Xi[:,0,:] + zCG_turbine[ir]*self.Xi[:,4,:] )  # fore-aft acceleration of turbine CG
             '''
             aCG_turbine[:,:,ir,:] = -self.w**2 *(self.Xi[:,0:3,:] + np.cross(self.Xi[:,3:,:], rCG_turbine[ir], axisa=1, axisc=1))
-            # tmp = np.cross(self.Xi[:,3:,:], rCG_turbine[ir], axisa=1, axisc=1).imag
-            # tmp1 = self.Xi[:,:,:].imag
-            # plt.plot(self.w,tmp[0,0,:], '*')
-            # plt.plot(self.w,tmp1[0,0,:])
+            aArm[:,:,ir,:]        = -self.w**2 *(np.cross(self.Xi[:,3:,:], rArm[ir], axisa=1, axisc=1))
+            # tmp = np.cross(self.Xi[:,3:,:], rCG_turbine[ir], axisa=1, axisc=1)
+            # tmp1 = self.Xi[:,:,:]
+            # plt.plot(self.w,np.angle(tmp[0,0,:],deg=True), '*')
+            # plt.plot(self.w,np.angle(tmp1[0,0,:],deg=True), '--r')
+            # plt.plot(self.w,np.angle(tmp1[0,4,:],deg=True), '--g')
+            # plt.plot(self.w,np.angle(self.Xi[0,4,:]*rCG_turbine[ir,2],deg=True), 'r:')
+            # plt.plot(self.w,np.angle(tmp[0,0,:], deg=True), '*')
+            # plt.plot(self.w,np.angle(tmp1[0,0,:], deg=True), '--r')
+            # plt.plot(self.w,np.angle(tmp1[0,4,:]*90), '--g')
             # plt.show()
             # tmp = -self.w[np.newaxis,np.newaxis,:]**2 *(self.Xi[:,0:3,:] + np.cross(self.Xi[:,3:,:], rCG_turbine[ir], axisa=1, axisc=1))
             # plt.plot(self.w, np.abs(aCG_turbine[0,2,ir,:]), '*')
@@ -2370,28 +2379,37 @@ class FOWT():
             '''
             
             ICG_turbine[ir] = ( translateMatrix6to6DOF(self.memberList[self.nplatmems+ir].M_struc, -rCG_turbine[ir])[3:,3:]   # tower MOI about turbine CG
-                            + np.diag([rotor.mRNA, rotor.mRNA, rotor.mRNA]) * np.linalg.norm(rotor.r_CG_rel-rCG_turbine[ir])**2
-                            + np.diag([rotor.IxRNA, rotor.IrRNA, rotor.IrRNA]) ) # RNA MOI with parallel axis theorem
+                            + translateMatrix6to6DOF(np.diag([rotor.mRNA, rotor.mRNA, rotor.mRNA, rotor.IxRNA, rotor.IrRNA, rotor.IrRNA]),
+                               (rotor.r_CG_rel-rCG_turbine[ir]))[3:,3:] )
+                            # + np.diag([rotor.IxRNA, rotor.IrRNA, rotor.IrRNA]) ) # RNA MOI with parallel axis theorem
 
             # moment components and summation (all complex amplitudes)
             '''
             M_I[:,ir,:] = -m_turbine[ir]*aCG_turbine[:,ir,:]*hArm[ir] - ICG_turbine[ir]*(-self.w**2 *self.Xi[:,4,:] ) # tower base inertial reaction moment
             M_w[:,ir,:] =  m_turbine[ir]*self.g * hArm[ir]*self.Xi[:,4]  
             '''
-            XiArm[:,:,ir,:] = np.cross(self.Xi[:,3:,:], rArm[ir], axisa=1, axisc=1) # a rel Xi to translational motion
-            M_I[:,0:3,ir,:] = -np.cross(rArm[ir], m_turbine[ir]*aCG_turbine[:,:,ir,:], axisb=1, axisc=1) - np.matmul(ICG_turbine[ir], (-self.w**2 *self.Xi[:,3:,:])) # tower base inertial reaction moment
+            XiArm[:,:,ir,:] =  np.cross(self.Xi[:,3:,:], rArm[ir], axisa=1, axisc=1) # a rel Xi to translational motion
+            # M_I[:,0:3,ir,:] = -np.cross(rArm[ir], m_turbine[ir]*aCG_turbine[:,:,ir,:], axisb=1, axisc=1) - np.matmul(ICG_turbine[ir], (-self.w**2 *self.Xi[:,3:,:])) # tower base inertial reaction moment
+            M_I[:,0:3,ir,:] = -np.cross(rArm[ir], m_turbine[ir]*aCG_turbine[:,:,ir,:], axisb=1, axisc=1) - np.matmul(ICG_turbine[ir], (-self.w**2 *self.Xi[:,3:,:]))
+            # M_I[:,0:3,ir,:] = -np.matmul(ICG_turbine[ir], (-self.w**2 *self.Xi[:,3:,:]))
             M_w[:,0:3,ir,:] =  np.cross(XiArm[:,:,ir,:], m_turbine[ir]*self.g*np.array([0,0,-1]), axisa=1, axisc=1)                         # tower base weight moment
             
+            # tmp0 = -np.cross(rArm[ir], m_turbine[ir]*aArm[:,:,ir,:], axisb=1, axisc=1)
+            # tmp1 = - np.matmul(ICG_turbine[ir], (-self.w**2 *self.Xi[:,3:,:]))
+            # plt.plot(self.w, np.angle(tmp0[0,1,:]   ), '--r')
+            # plt.plot(self.w, np.angle(tmp1[0,1,:]   ), '--g')
+            # plt.plot(self.w, np.angle(aArm[0,0,ir,:]*1e8), '*')
+            # plt.show()
+
             '''M_F_aero = 0.0 # <<<<self.f_aero[0,:]*(self.hHub - zBase)  # tower base moment from turbulent wind excitation  <<<<<<<<<<<<<
             '''
 
-            M_F_aero = (np.cross((rotor.r_hub_rel-rBase[ir]), self.f_aero[0:3,:,ir], axisb=0, axisc=0)
+            M_F_aero = (np.cross((-rBase[ir]), self.f_aero[0:3,:,ir], axisb=0, axisc=0)
                         + self.f_aero[3:,:,ir])
-            
             # plt.plot(self.w, np.abs(M_I[0,0,ir,:]), '*')
             # plt.plot(self.w, np.abs(M_w[0,0,ir,:]), 'r*')
             # plt.plot(self.w, np.abs(M_F_aero[0]), 'g*')
-            # # plt.plot(self.w, np.abs(aCG_turbine[0,0,ir,:]), ':r')
+            # plt.plot(self.w, np.abs(aCG_turbine[0,0,ir,:]), ':r')
             # plt.show()
             '''
             M_X_aero[:,ir,:] = -(-self.w**2 *self.A_aero[0,0,:,ir]                                 # tower base aero reaction moment
@@ -2410,30 +2428,40 @@ class FOWT():
             # plt.plot(self.w, np.abs(aCG_turbine[0,0,ir,:]), ':r')
             # plt.show()
 
-            F_A_hub_tmp = -self.w**2 * np.transpose(np.matmul(np.transpose(self.A_aero[0:3,0:3,:,ir],(2,0,1)), np.transpose(XiHub[:,0:3,ir,:],(2,1,0))), (2,1,0))
-            F_B_hub_tmp = 1j*self.w  * np.transpose(np.matmul(np.transpose(self.B_aero[0:3,0:3,:,ir],(2,0,1)), np.transpose(XiHub[:,0:3,ir,:],(2,1,0))), (2,1,0))
+            # F_A_hub_tmp = -(-self.w**2 * np.transpose(np.matmul(np.transpose(self.A_aero[0:3,0:3,:,ir],(2,0,1)), np.transpose(XiHub[:,0:3,ir,:],(2,1,0))), (2,1,0)))
+            # F_B_hub_tmp = -(1j*self.w  * np.transpose(np.matmul(np.transpose(self.B_aero[0:3,0:3,:,ir],(2,0,1)), np.transpose(XiHub[:,0:3,ir,:],(2,1,0))), (2,1,0)))
+            F_A_hub_tmp = -(-self.w**2 * np.transpose(np.matmul(np.transpose(self.A_aero[0:6,0:6,:,ir],(2,0,1)), np.transpose(self.Xi[:,0:6,:],(2,1,0))), (2,1,0)))
+            M_A_hub_tmp = (np.cross((-rBase[ir]), F_A_hub_tmp[:,0:3,:], axisb=1, axisc=1)
+                        + F_A_hub_tmp[:,3:,:])
             
-            # plt.plot(self.w, np.real(F_A_hub_tmp[0,0,:]), '*')
-            # plt.plot(self.w, np.real(F_B_hub_tmp[0,0,:]), 'r*')
+            F_B_hub_tmp = -(1j*self.w  * np.transpose(np.matmul(np.transpose(self.B_aero[0:6,0:6,:,ir],(2,0,1)), np.transpose(self.Xi[:,:,:],(2,1,0))), (2,1,0)))
+            M_B_hub_tmp = (np.cross((-rBase[ir]), F_B_hub_tmp[:,0:3,:], axisb=1, axisc=1)
+                        + F_B_hub_tmp[:,3:,:])
+            # plt.plot(self.w, np.abs(F_A_hub_tmp[0,0,:]), '--')
+            # plt.plot(self.w, np.abs(F_B_hub_tmp[0,0,:]), '--')
             # plt.plot(self.w, np.real(XiHub[0,1,ir,:]), ':')
             # plt.plot(self.w, np.abs(F_A_hub_tmp[0,2,:]), 'g*')
             # plt.plot(self.w, np.abs(aCG_turbine[0,0,ir,:]), ':r')
             # plt.show()
             # M_B_tmp =  1j*self.w*np.transpose(np.matmul(np.transpose(self.B_aero[0:3,0:3,:,ir],(2,0,1)), XiHub[:,0:3,ir,:]), (2,0,1))
-            
-            M_X_aero[:,:,ir,:] = -np.cross((rotor.r_hub_rel - rBase[ir]), F_A_hub_tmp+F_B_hub_tmp, axisb=1, axisc=1) 
+            M_X_aero[:,:,ir,:] = M_A_hub_tmp + M_B_hub_tmp
+            # M_X_aero[:,:,ir,:] = np.cross((rotor.r_hub_rel - rBase[ir]), F_A_hub_tmp+F_B_hub_tmp, axisb=1, axisc=1) 
+            # plt.plot(self.w, np.abs(M_X_aero[0,1,ir,:]), '--r')           
             # M_X_aero[:,1,ir,:] = -(-self.w**2 *self.A_aero[0,0,:,ir]                                 # tower base aero reaction moment
             #                     + 1j*self.w *self.B_aero[0,0,:,ir] )*(rotor.r_rel[2] - rBase[ir,2])**2 *self.Xi[:,4,:]
+            # plt.plot(self.w, np.abs(M_X_aero[0,1,ir,:]), '--g') 
+            # plt.show()
             dynamic_moment[:,:,ir,:] = M_I[:,:,ir,:] + M_w[:,:,ir,:] + M_F_aero + M_X_aero[:,:,ir,:]       # total tower base fore-aft bending moment [N-m]
             
             R_tower = self.memberList[self.nplatmems + ir].R
             dynamic_moment_rel[:,:,ir,:] = np.matmul(R_tower, dynamic_moment[:,0:3,ir,:])
-            # plt.plot(self.w, np.real(M_I     [0,1,ir,:]), '*')
-            # plt.plot(self.w, np.real(M_w     [0,1,ir,:]), 'r*')
-            # plt.plot(self.w, np.real(M_X_aero[0,1,ir,:]), 'g*')
-            # plt.plot(self.w, np.real(M_F_aero[1       ]), ':')
-            # plt.plot(self.w, np.abs(XiHub[0,1,ir,:]), ':o')
-            # plt.plot(self.w, np.abs(self.Xi[0,4,:]),  ':r')
+            # plt.plot(self.w, np.abs(M_I     [0,1,ir,:]), '--y')
+            # plt.plot(self.w, np.abs(M_w     [0,1,ir,:]), '--r')
+            # plt.plot(self.w, np.abs(M_X_aero[0,1,ir,:]), '--g')
+            # plt.plot(self.w, np.abs(M_F_aero[1       ]), '--')
+            # plt.plot(self.w, np.abs(XiHub[0,0,ir,:]*5e7), ':o')
+            # plt.plot(self.w, np.abs(self.Xi[0,0,:]*1e7),  ':')
+            # plt.plot(self.w, np.abs(self.Xi[0,4,:]*2e9),  ':')
 
             # plt.show()
             dynamic_moment_RMS[ir, 0] = getRMS(dynamic_moment[:,0,ir,:])
@@ -2451,8 +2479,8 @@ class FOWT():
                           + transformForce(self.f_aero0[:,ir], offset=[0,0,-hArm[ir]])[4] )
             '''
             Mbase_avg = (np.cross(rArm[ir], m_turbine[ir]*self.g*np.array([0,0,-1]))
-                        + transformForce(self.f_aero0[:,ir], offset=rArm[ir])[3:]
-                        + transformForce(self.F_tower_aero, offset=-rBase[ir])[3:])
+                        + transformForce(self.f_aero0[:,ir], offset=-rBase[ir])[3:]
+                        + transformForce(self.F_tower_aero[:,ir], offset=-rBase[ir])[3:])
             
             Mbase_rel_avg = np.matmul(R_tower, Mbase_avg)
                         
@@ -2473,23 +2501,23 @@ class FOWT():
         results['wave_PSD'] = getPSD(self.zeta, self.dw)        # wave elevation spectrum
 
         
-        fig, ax = plt.subplots(9, 1, sharex=True)
-        TwoPi = np.pi*2
-        # loop through each FOWT and plot its response (on the same figure for now)
-        metrics = results
-        ax[0].plot(self.w / TwoPi, TwoPi * metrics['surge_PSD'][:])  # surge
-        ax[1].plot(self.w / TwoPi, TwoPi * metrics['sway_PSD'][:])  # surge
-        ax[2].plot(self.w / TwoPi, TwoPi * metrics['heave_PSD'][:])  # heave
-        ax[3].plot(self.w / TwoPi, TwoPi * metrics['pitch_PSD'][:])  # pitch [deg]
-        ax[4].plot(self.w / TwoPi, TwoPi * metrics['roll_PSD'][:])  # pitch [deg]
-        ax[5].plot(self.w / TwoPi, TwoPi * metrics['yaw_PSD'][:])  # pitch [deg]
-        ax[6].plot(self.w / TwoPi, TwoPi * metrics['AxRNA_PSD'][:])  # nacelle acceleration
-        ax[7].plot(self.w / TwoPi,
-                   TwoPi * metrics['Mybase_PSD'][:])  # tower base bending moment (using FAST's kN-m)
-        ax[8].plot(self.w / TwoPi, TwoPi * metrics['wave_PSD'][ :],
-                   label=f'case')  # wave spectrum
-        
-        plt.show()
+        # fig, ax = plt.subplots(9, 1, sharex=True)
+        # TwoPi = np.pi*2
+        # # loop through each FOWT and plot its response (on the same figure for now)
+        # metrics = results
+        # ax[0].plot(self.w / TwoPi, TwoPi * metrics['surge_PSD'][:], '--r')  # surge
+        # ax[1].plot(self.w / TwoPi, TwoPi * metrics['sway_PSD'][:] , '--r')  # surge
+        # ax[2].plot(self.w / TwoPi, TwoPi * metrics['heave_PSD'][:], '--r')  # heave
+        # ax[3].plot(self.w / TwoPi, TwoPi * metrics['pitch_PSD'][:], '--r')  # pitch [deg]
+        # ax[4].plot(self.w / TwoPi, TwoPi * metrics['roll_PSD'][:] , '--r')  # pitch [deg]
+        # ax[5].plot(self.w / TwoPi, TwoPi * metrics['yaw_PSD'][:]  , '--r')  # pitch [deg]
+        # ax[6].plot(self.w / TwoPi, TwoPi * metrics['AxRNA_PSD'][:], '--r')  # nacelle acceleration
+        # ax[7].plot(self.w / TwoPi,
+        #            TwoPi * metrics['Mybase_PSD'][:]/1e6)  # tower base bending moment (using FAST's kN-m)
+        # ax[8].plot(self.w / TwoPi, TwoPi * metrics['wave_PSD'][ :],
+        #            label=f'case')  # wave spectrum
+        # # plt.xlim(0.05, 0.2)
+        # plt.show()
         
         
         # initialize complex amplitudes for rotor response
@@ -3069,7 +3097,7 @@ class FOWT():
                     self.calcQTF_slenderBody(waveHeadInd=0, Xi0=Xi0, verbose=True, iCase=iCase, iWT=i)
                     toc = time.perf_counter()
                     if display > 1:
-                        print(f"\n Time to compute QTFs for fowt {i}: {toc - tic:0.4f} seconds")
+                        print(f"\n Time to compute QTFs for fowt : {toc - tic:0.4f} seconds")
 
                     # After computing the QTFs internally, we can now compute the second-order hydrodynamic forces
                     self.Fhydro_2nd_mean[0, :], self.Fhydro_2nd[0, :, :] = self.calcHydroForce_2ndOrd(self.beta[0], self.S[0,:], iCase=iCase, iWT=i)
@@ -3195,6 +3223,9 @@ class FOWT():
 
         return self.Xi  # is it better to return the response or save it in the model object? Or in the FOWT objects? <<<
 
+    def copy(self):
+
+        return copy.deepcopy(self)
 
     def plot(self, ax, color=None, nodes=0, plot_rotor=True, station_plot=[], 
              airfoils=False, zorder=2, plot_fowt=True, plot_ms=True, 

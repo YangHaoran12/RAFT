@@ -1,6 +1,6 @@
-from raft.raft_member_yang import Member, TowerMember
+from raft.raft_member import Member, TowerMember
 from raft.raft_mesh import platformMesh, sPlatformMesh
-from raft.raft_rotor_yang import raft_dir
+from raft.raft_rotor import raft_dir
 import yaml
 import numpy as np
 import os

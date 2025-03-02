@@ -1473,7 +1473,7 @@ def inerpStr(x=np.ndarray, xp=np.ndarray, fp=list[str]):
         for j in range (len(xp)-1):
 
             if x[i] >= xp[j] and x[i] < xp[j+1]:
-                f.append(fp[j])
+                f.append(fp[j+1])
                 break
             
             elif x[i] < xp[0]:
@@ -1483,6 +1483,7 @@ def inerpStr(x=np.ndarray, xp=np.ndarray, fp=list[str]):
     f.append(fp[-1])
     
     return f
+
 
 if __name__ == '__main__':
     
