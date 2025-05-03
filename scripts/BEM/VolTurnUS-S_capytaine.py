@@ -4,10 +4,10 @@ import os
 import numpy as np
 
 # meshFile = os.path.join(raft_dir, 'models/nemoh/OC4_3087.dat')
-meshFile = os.path.join(raft_dir, 'models/nemoh/VolTurnUS-S_4159.dat')
+meshFile = os.path.join(raft_dir, 'models/nemoh/VolTurnUS-S_4159_.dat')
 
 solver = CapytaineSolver(memList=None, cog=[0,0,0], include0andinf=True, headings=np.arange(0,210,30), nw=81)
-solver.getCapytaineMeshFromFile("models/nemoh/OC4_3087.dat")
+solver.getCapytaineMeshFromFile("models/nemoh/VolTurnUS-S_4159_.dat")
 solver.defineProblems()
 
 solver.solveProblems(nThreads=8)

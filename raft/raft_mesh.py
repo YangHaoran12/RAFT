@@ -774,6 +774,11 @@ class MemberMesh(object):
         elif filename.endswith('.dat'):
             from meshmagick.mmio import write_MAR
             write_MAR(filename, self._vertices, self._faces)
+
+        elif filename.endswith('.stl'):
+            from meshmagick.mmio import write_STL
+            write_STL(filename, self._vertices, self._faces)
+
         else:
             raise NotImplementedError("writter but 'VTP', 'PNL', 'NEMOH.dat' is not implemented yet")
 
@@ -1114,7 +1119,7 @@ class platformMesh:
     
 class sPlatformMesh(platformMesh): # single platform mesh, all members are attached together in Gmsh process
 
-    def __init__ (self, mainMembers=list[Member], attchingMembers = list[Member], sizeMin=0.1, sizeMax=1.0, constraint=0.25, recombined=True, clip=True):
+    def __init__ (self, mainMembers=list[Member], attchingMembers = list[Member], sizeMin=0.1, sizeMax=1.0, constraint=0.25, recombined=True, clip=True, show=False):
         import gmsh
         gmsh.initialize()
 
@@ -1146,7 +1151,7 @@ class sPlatformMesh(platformMesh): # single platform mesh, all members are attac
         gmsh.model.occ.fuse([(3, len(mainList)+1)], mainList)
         gmsh.model.occ.synchronize()
 
-        gmsh.fltk.run()
+        # gmsh.fltk.run()
 
         # tag = gmsh.model.occ.getEntities(3)
 
@@ -1179,7 +1184,8 @@ class sPlatformMesh(platformMesh): # single platform mesh, all members are attac
         nodes, coords, _ = gmsh.model.mesh.getNodes()
         elementType, elements, elementNodes = gmsh.model.mesh.getElements()
 
-        # gmsh.fltk.run()
+        if show:
+            gmsh.fltk.run()
         
         gmsh.finalize()
 

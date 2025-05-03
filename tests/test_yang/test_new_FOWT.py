@@ -34,12 +34,14 @@ case1 = dict(zip(design['cases']['keys'], design['cases']['data'][0]))
 fowt.setPosition([0,0,0,0,0,0])
 fowt.calcStatics()
 
-V_required = (fowt.V*fowt.rho_water - fowt.m_shell) / fowt.rho_water
-V_ballast  = np.sum([mem.V for mem in fowt.memberList])
+# V_required = (fowt.V*fowt.rho_water - fowt.m_shell) / fowt.rho_water
+# V_ballast  = np.sum([mem.V for mem in fowt.memberList])
 
 # fowt.calcTowerAeroLoads(case)
 fowt.solveStatics(case)
-fowt.solveDynamics(case, RAO_plot=False)
+fowt.solveDynamics(case, RAO_plot=True)
+
+plt.show()
 
 results = {}
 fowt.saveTurbineOutputs(results=results, case=case)

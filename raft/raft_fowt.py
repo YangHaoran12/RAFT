@@ -354,7 +354,8 @@ class FOWT():
             # ---------------------- get member's mass and inertia properties ------------------------------
             # get member mass and inertia info (including mem.M_struc) <<< still split between converting to PRP in or out of these functions
             # mass, center, m_shell, mfill, pfill = mem.getInertia(rPRP=self.r6[:3]) 
-            mass, center, m_shell, mfill, pfill = mem.getInertiaOpt(rPRP=self.r6[:3])
+            # mass, center, m_shell, mfill, pfill = mem.getInertiaOpt(rPRP=self.r6[:3], rPRPRot=self.r6[3:])
+            mass, center, m_shell, mfill, pfill = mem.getInertia(rPRP=self.r6[:3])
 
             # Calculate the mass matrix of the FOWT about the PRP
             self.W_struc += translateForce3to6DOF( np.array([0,0, -g*mass]), center )  # weight vector
@@ -457,7 +458,8 @@ class FOWT():
             # create mass/inertia matrix
             Mmat = np.diag([rotor.mRNA, rotor.mRNA, rotor.mRNA, 
                             rotor.IxRNA, rotor.IrRNA, rotor.IrRNA])
-            
+            # if i == 1:
+            #     Mmat[3,3] = -Mmat[3,3]
             # Rotate RNA mass matrix into the global orientation
             Mmat = rotateMatrix6(Mmat, rotor.R_q)  
             
@@ -513,6 +515,9 @@ class FOWT():
         else:
             zMeta   = min([rCB_TOT[2] + IWPy_TOT/VTOT, rCB_TOT[2] + IWPx_TOT/VTOT])  # add center of buoyancy and BM=I/v to get z elevation of metecenter [m] (have to pick one direction for IWP)
 
+        # tmp = [rCB_TOT[2] + IWPy_TOT/VTOT, rCB_TOT[2] + IWPx_TOT/VTOT]
+        self.zMetay = rCB_TOT[2] + IWPy_TOT/VTOT
+        self.zMetax = rCB_TOT[2] + IWPx_TOT/VTOT
         self.C_struc[3,3] = -m_all*g*rCG_all[2]
         self.C_struc[4,4] = -m_all*g*rCG_all[2]
         
@@ -873,10 +878,10 @@ class FOWT():
         added mass, damping, and excitation matrices. This is as an alternative 
         to PyHAMS or strip theory, and is done when potFirstOrder == 1/True.'''
         
-        from raft.raft_bem import readWamit1, readWamit3
+        from raft.raft_bem import readWamit1, readWamit3, readWamit1PWD, readWamit3PWD
         
-        addedMass, damping, w1 = readWamit1(self.hydroPath+'.1')  # first two entries in frequency dimension are expected to be zero-frequency then infinite frequency
-        _, _, R, I, w3, heads  = readWamit3(self.hydroPath+'.3')   
+        addedMass, damping, w1 = readWamit1PWD(self.hydroPath+'.1')  # first two entries in frequency dimension are expected to be zero-frequency then infinite frequency
+        _, _, R, I, w3, heads  = readWamit3PWD(self.hydroPath+'.3')   
         # The Tflag means that the first column is in units of periods, not frequencies, and therefore the first set (-1) becomes zero-frequency and the second set is infinite
 
         self.BEM_headings = np.array(heads)%(360)  # save headings in range of 0-360 [deg]            # interpole to the frequencies RAFT is using        
@@ -976,6 +981,10 @@ class FOWT():
                     # Note: these are about hub coordinate in global orientation.
                     f_aero0, f_aero, a_aero, b_aero = rot.calcAero(case, current=current)  # get values about hub
                     
+                    if ir == 1:
+                        f_aero0[1] = - f_aero0[1]
+                        f_aero0[3] = - f_aero0[3]
+                        f_aero0[5] = - f_aero0[5]
                     # convert coefficients to platform reference frame and populate tensor slice for this rotor
                     for iw in range(self.nw):
                         self.A_aero[:,:,iw,ir] = translateMatrix6to6DOF(a_aero[:,:,iw], rot.r_hub_rel)
@@ -1079,12 +1088,12 @@ class FOWT():
             List of mode shapes (eigenvectors) corresponding to the natural 
             frequencies.
         '''
-        from scipy.linalg import eig
+        from scipy.linalg import eig, eigh
 
         # Total mass and added mass matrix [kg, kg-m, kg-m^2]
         M_tot = self.M_struc + self.A_hydro_morison   # mass  (BEM option not supported yet)
         C_tot = self.getStiffness()  # stiffness
-
+        
         # check viability of matrices
         message=''
         for i in range(self.nDOF):
@@ -1100,12 +1109,18 @@ class FOWT():
 
         A_BEM_interp = interp1d(f, self.A_BEM, assume_sorted=True, axis=2)
 
+        # tmp = A_BEM_interp(1/80)
+        # tmp = [A_BEM_interp(nf)[0,0] for nf in f]
+        # fig, ax = plt.subplots(1)
+        # ax.plot(f, tmp)
+        # plt.show()
+
         fns = np.zeros(6)
         modes = np.zeros((6,6))
 
         for i in range(6): # search in 6 modes
             ###################################### initial configuration of iteration method
-            f0 = 0.1 # first 
+            f0 = 0.05 # first 
             tol = 1e-6
             diff = 1.0
             iter = 0
@@ -1117,8 +1132,31 @@ class FOWT():
                 A_BEM_tmp = A_BEM_interp(f0)
                 M_tot_tmp = M_tot + A_BEM_tmp
 
-                eigenvals, eigenvectors = eig(C_tot, M_tot_tmp)
+                # M_tot_tmp = translateMatrix6to6DOF(M_tot_tmp, [-self.rCG[0],0,0])
+                # C_tot     = translateMatrix6to6DOF(C_tot, [-self.rCG[0],0,0])
 
+                # M_tot_tmp = translateMatrix6to6DOF(M_tot_tmp, -self.rCG)
+                # M_tmp = translateMatrix6to6DOF(M_tot, -self.rCG)
+                # C_tot     = translateMatrix6to6DOF(C_tot, -self.rCG)
+
+                eigenvals, eigenvectors = eig(C_tot, M_tot_tmp)
+                
+                idx = np.argsort(eigenvals)
+                eigenvals = eigenvals[idx]
+                eigenvectors = eigenvectors[:, idx]
+                # eigvals, eigvecs = eig(C_tot, M_tot_tmp)
+                # for i in range(len(eigvals)):
+                #     eigvecs[:, i] /= np.sqrt(eigvecs[:, i].T @ M_tot_tmp @ eigvecs[:, i])
+
+                # # 验证模态正交性
+                # M_modal = eigvecs.T @ M_tot_tmp @ eigvecs  # 应接近单位矩阵
+                # K_modal = eigvecs.T @ M_tot_tmp @ eigvecs  # 应为对角矩阵
+                # for i in range(6):
+                #     for j in range(6):
+                #         print(f'{eigenvectors[j, i]:10.2f}')
+
+                #     print('\n')
+                # tmp = np.sqrt(C_tot[0,0]/M_tot_tmp[0,0])/ (2*np.pi)
                 # dof = np.argmax(np.abs(eigenvectors[i, :]))
                 f1 = np.sqrt(np.real(eigenvals[i])) / (2*np.pi)                
                 
@@ -1135,16 +1173,18 @@ class FOWT():
                     break
 
             vec = eigenvectors[:, i] # temporary vec of eigenvectors for mode identification
-            
+            fns[i] = f0
+            modes[:3, i] = eigenvectors[:3, i] 
+            modes[3:, i] = eigenvectors[3:, i]
             ####################################### determine mode's order
-            for j in range (i+1):
-                dof = np.argmax(np.abs(vec))
+            # for j in range (i+1):
+            #     dof = np.argmax(np.abs(vec))
 
-                if fns[dof] != 0:
-                    vec[dof] = 0
-                else:
-                    fns[dof] = f0
-                    modes[:, dof] = eigenvectors[:, i] # modes
+            #     if fns[dof] != 0:
+            #         vec[dof] = 0
+            #     else:
+            #         fns[dof] = f0
+            #         modes[:, dof] = eigenvectors[:, i] # modes
 
         if any(fns <= 0.0):
             raise RuntimeError("Error: zero or negative system eigenvalues detected.")
@@ -1712,12 +1752,11 @@ class FOWT():
                             # ----- sum forces and add to total mean drag load about PRP ------
                             D =  Dp1 + Dp2     # sum drag forces at node in member's local orientation frame
 
-                            mem.F_aero = D
+                            mem.F_aero[il] = D
                             F_tower_aero[:, ir] += translateForce3to6DOF(D, mem.r[il,:] - self.r6[:3])  # sum as forces and moments about PRP
                     
         self.F_tower_aero = F_tower_aero  # save hydro drag forces/moments to FOWT for later access
-
-        return np.sum(F_tower_aero, axis=0)
+        return np.sum(F_tower_aero, axis=1)
 
 
     def calcQTF_slenderBody(self, waveHeadInd, Xi0=None, verbose=False, iCase=None, iWT=None):
@@ -2499,7 +2538,7 @@ class FOWT():
         
         # wave PSD for reference
         results['wave_PSD'] = getPSD(self.zeta, self.dw)        # wave elevation spectrum
-
+        results['wave_RA']  = self.zeta
         
         # fig, ax = plt.subplots(9, 1, sharex=True)
         # TwoPi = np.pi*2
@@ -2554,9 +2593,9 @@ class FOWT():
             
                 # compute spectra of rotor azimuth variation, rotor speed, generator torque, and blade pitch
                 for ih in range(self.nWaves):
-                    phi_w[ih,ir,:] = rot.C * XiHub[ih,ir,:]
+                    phi_w[ih,ir,:] = rot.C * XiHub[ih,0,ir,:]
                 
-                phi_w[-1,ir,:] = rot.C * (XiHub[-1,ir,:] - rot.V_w / (1j *self.w))
+                phi_w[-1,ir,:] = rot.C * (XiHub[-1,0,ir,:] - rot.V_w / (1j *self.w))
                 
                 # TODO
                 omega_w[ :,ir,:] =  1j*self.w * phi_w[:,ir,:]
@@ -2655,7 +2694,7 @@ class FOWT():
         self.add_output('tower_maxMy_Mz', val=np.zeros(n_full_tow-1), units='kN*m', desc='distributed moment around tower-aligned x-axis corresponding to maximum fore-aft moment at tower base')
         '''
 
-    def solveStatics(self, case, display=0):
+    def solveStatics(self, case, display=0, statics_mod=1, forcing_mod=1):
         '''
         
         Old notes: To support nonlinear hydrostatics and multiple moorpy instances, this needs to
@@ -2677,8 +2716,8 @@ class FOWT():
         New change: supports either a single wind speed or a list (where there is one wind speed per turbine)
         '''
         
-        statics_mod = 1
-        forcing_mod = 1
+        # statics_mod = 1
+        # forcing_mod = 1
         
         if statics_mod == 0:  # if using linearized hydrostatics approach, get the matrices
             K_hydrostatic = np.zeros((6,6)) #np.zeros([self.nDOF, self.nDOF])   # this will be the constant hydrostatic stiffness matrix--buoyancy and weight terms
@@ -2699,7 +2738,7 @@ class FOWT():
             
         # set initial values before solving        
         
-        if display > 1:  print(f"FOWT {i+1:}")
+        # if display > 1:  print(f"FOWT {i+1:}")
         
         X_initial = np.array([self.x_ref, self.y_ref,0,0,0,0])
         self.setPosition(X_initial)      # zero platform offsets
@@ -2712,7 +2751,7 @@ class FOWT():
         elif statics_mod == 1:
             pass # K_hydrostatic F_undisplaced will be updated each iteration
 
-        if display > 1:  print(" F_undisplaced "+"  ".join(["{:+8.2e}"]*6).format(*F_undisplaced))
+        # if display > 1:  print(" F_undisplaced "+"  ".join(["{:+8.2e}"]*6).format(*F_undisplaced))
 
         if forcing_mod == 0 and case:
                              
@@ -2755,7 +2794,7 @@ class FOWT():
         
         # figure out some settings to the equilibrium solve
         db = np.array([30, 30, 5, 0.1, 0.1, 0.1])  # array for max step size (used manually in step func)
-        tols = np.array([0.05,0.05,0.05, 0.005,0.005,0.005]) # create vector of tolerances - tol = 0.05  rtol = tol/10
+        tols = np.array([0.01,0.01,0.01, 0.001,0.001,0.001]) # create vector of tolerances - tol = 0.05  rtol = tol/10
         
         
         '''Calculates mean offsets and linearized mooring properties for the current load case.
@@ -2817,18 +2856,29 @@ class FOWT():
                 # mooring forces (includes if currents were updated above)
                 Fnet += self.F_moor0 # fowt.ms.bodyList[0].getForces(lines_only=True)  # individual mooring forces
                 # if self.ms:
-                #     Fnet[6*i:6*i+6] += self.ms.bodyList[i].getForces(lines_only=True)     # array-level mooring forces
-                
+                #     Fnet[6*i:6*i+6] += self.ms.bodyList[i].getForces(lines_only=True)     # array-level mooring forces          
+            
+           
+            
+            Y = Fnet
             
             if display > 1:
                 print("Net forces")
                 printVec(Fnet)
                 
+                print('Mooring forces')
+                printVec(self.F_moor0)
+
+                print('Weight forces')
+                printVec(self.W_struc)
+
+                print('Buoy forces')
+                printVec(self.W_hydro)
+
                 RMSeForce  = np.linalg.norm(Y[:3])
                 RMSeMoment = np.linalg.norm(Y[3:])
                 print(f"Iteration RMS force and moment errors: {RMSeForce:8.2e} {RMSeMoment:8.2e}")
             
-            Y = Fnet
             oths = dict(status=1)                # other outputs - returned as dict for easy use
            
             return Y, oths, False
@@ -2895,7 +2945,7 @@ class FOWT():
         
         # Now find static equilibrium offsets 
         X, Y, info = dsolve2(eval_func_equil, X_initial, step_func=step_func_equil, 
-                             tol=tols, a_max=1.6, maxIter=20, display=0, args={'display': display} ) #, dodamping=True)
+                             tol=tols, a_max=1.6, maxIter=50, display=0, args={'display': display} ) #, dodamping=True)
 
         if display > 1:
             RMSeForce  = np.linalg.norm(Y[:3])
@@ -3249,7 +3299,7 @@ class FOWT():
         if plot_fowt:
             if plot_rotor:
                 for rotor in self.rotorList:
-                    rotor.plot(ax, color=color, airfoils=airfoils, zorder=zorder)
+                    rotor.plot(ax, color=color, airfoils=airfoils, zorder=zorder, draw_circle=True)
 
             # loop through each member and plot it
             for mem in self.memberList:

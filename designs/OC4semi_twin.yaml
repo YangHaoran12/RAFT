@@ -18,8 +18,8 @@ site:
 cases:
     keys : [wind_speed, wind_heading, turbulence, turbine_status, yaw_misalign, wave_spectrum, wave_period, wave_height, wave_heading  ]
     data :  #   m/s        deg    % or e.g. 2B_NTM    string            deg         string          (s)         (m)         (deg)
-        -  [    12,         0,            0.01,       operating,          0,        JONSWAP,         13.1,        8.5,           0        ]
-
+        -  [    11.1,         0,            0.01,       parked,          0,        JONSWAP,         13.1,        8.5,           0        ]
+        # -  [    11.1,         0,            0.01,       operating,          0,        JONSWAP,         13.1,        8.5,           0        ]
 
 turbine:
 
@@ -1037,7 +1037,7 @@ turbine:
       - name      :  tower1                     # [-]    an identifier (no longer has to be number)       
         type      :  1                         # [-]    
         rA        :  [ 0, 0,     10]             # [m]    end A coordinates
-        rB        :  [ 0, 66.15, 78.6]             # [m]    and B coordinates
+        rB        :  [ 0, 66.15, 78.55]             # [m]    and B coordinates
         shape     :  circ                      # [-]    circular or rectangular
         gamma     :  0.0                       # [deg]   twist angle about the member's z-axis
         
@@ -1045,13 +1045,13 @@ turbine:
         stations  :  [ 10, 17.76, 25.52, 33.28, 41.04, 48.8, 56.56, 64.32, 72.08, 79.84, 87.6 ]    # [-]    location of stations along axis. Will be normalized such that start value maps to rA and end value to rB
         d         :  [ 6.5, 6.237, 5.974, 5.711, 5.448, 5.185, 4.922, 4.659, 4.396, 4.133, 3.870 ]    # [m]    diameters if circular or side lengths if rectangular (can be pairs)
         t         :  [ 0.027, 0.0262, 0.0254, 0.0246, 0.0238, 0.023, 0.0222, 0.0214, 0.0206, 0.0198, 0.0190 ]                     # [m]    wall thicknesses (scalar or list of same length as stations)
-        Cd        :  0.5                       # [-]    transverse drag coefficient       (optional, scalar or list of same length as stations)
+        Cd        :  1.0                       # [-]    transverse drag coefficient       (optional, scalar or list of same length as stations)
         Ca        :  0.0                       # [-]    transverse added mass coefficient (optional, scalar or list of same length as stations)
         # (neglecting axial coefficients for now)
         CdEnd     :  0.0                       # [-]    end axial drag coefficient        (optional, scalar or list of same length as stations)
         CaEnd     :  0.0                       # [-]    end axial added mass coefficient  (optional, scalar or list of same length as stations)
         rho_shell :  8500                      # [kg/m3]   material density
-        
+        dlsMax    :  5
         # --- ballast ---
         l_fill    :  0                         # [m]
         rho_fill  :  0                         # [kg/m3]
@@ -1059,15 +1059,15 @@ turbine:
       - name      :  tower2                     # [-]    an identifier (no longer has to be number)       
         type      :  1                         # [-]    
         rA        :  [ 0, 0,   10]             # [m]    end A coordinates
-        rB        :  [ 0, -66.15, 78.6]             # [m]    and B coordinates
+        rB        :  [ 0, -66.15, 78.55]             # [m]    and B coordinates
         shape     :  circ                      # [-]    circular or rectangular
         gamma     :  0.0                       # [deg]   twist angle about the member's z-axis
-        
+        dlsMax    :  5
         # --- outer shell including hydro---
         stations  :  [ 10, 17.76, 25.52, 33.28, 41.04, 48.8, 56.56, 64.32, 72.08, 79.84, 87.6 ]    # [-]    location of stations along axis. Will be normalized such that start value maps to rA and end value to rB
         d         :  [ 6.5, 6.237, 5.974, 5.711, 5.448, 5.185, 4.922, 4.659, 4.396, 4.133, 3.870 ]    # [m]    diameters if circular or side lengths if rectangular (can be pairs)
         t         :  [ 0.027, 0.0262, 0.0254, 0.0246, 0.0238, 0.023, 0.0222, 0.0214, 0.0206, 0.0198, 0.0190 ]                     # [m]    wall thicknesses (scalar or list of same length as stations)
-        Cd        :  0.5                       # [-]    transverse drag coefficient       (optional, scalar or list of same length as stations)
+        Cd        :  1.0                       # [-]    transverse drag coefficient       (optional, scalar or list of same length as stations)
         Ca        :  0.0                       # [-]    transverse added mass coefficient (optional, scalar or list of same length as stations)
         # (neglecting axial coefficients for now)
         CdEnd     :  0.0                       # [-]    end axial drag coefficient        (optional, scalar or list of same length as stations)
@@ -1102,8 +1102,8 @@ platform:
         potMod    :  True                      # [bool] Whether to model the member with potential flow (BEM model) plus viscous drag or purely strip theory
         # --- outer shell including hydro---
         stations  :  [0, 1]                    # [-]    location of stations along axis. Will be normalized such that start value maps to rA and end value to rB
-        d         :  10.0                      # [m]    diameters if circular or side lengths if rectangular (can be pairs)
-        t         :  0.05                      # [m]    wall thicknesses (scalar or list of same length as stations)
+        d         :  8.0                      # [m]    diameters if circular or side lengths if rectangular (can be pairs)
+        t         :  0.04                      # [m]    wall thicknesses (scalar or list of same length as stations)
         Cd        :  0.8                       # [-]    transverse drag coefficient       (optional, scalar or list of same length as stations)
         Ca        :  1.0                       # [-]    transverse added mass coefficient (optional, scalar or list of same length as stations)
         CdEnd     :  0.6                       # [-]    end axial drag coefficient        (optional, scalar or list of same length as stations)
@@ -1125,8 +1125,8 @@ platform:
         potMod    :  True                      # [bool] Whether to model the member with potential flow (BEM model) plus viscous drag or purely strip theory
         # --- outer shell including hydro---
         stations  :  [0, 1]                   # [-]    location of stations along axis. Will be normalized such that start value maps to rA and end value to rB
-        d         :  12.5                      # [m]    diameters if circular or side lengths if rectangular (can be pairs)
-        t         :  0.05                      # [m]    wall thicknesses (scalar or list of same length as stations)
+        d         :  10.0                      # [m]    diameters if circular or side lengths if rectangular (can be pairs)
+        t         :  0.04                      # [m]    wall thicknesses (scalar or list of same length as stations)
         Cd        :  0.8                       # [-]    transverse drag coefficient       (optional, scalar or list of same length as stations)
         Ca        :  1.0                       # [-]    transverse added mass coefficient (optional, scalar or list of same length as stations)
         CdEnd     :  0.6                       # [-]    end axial drag coefficient        (optional, scalar or list of same length as stations)
@@ -1150,8 +1150,8 @@ platform:
         potMod    :  True                      # [bool] Whether to model the member with potential flow (BEM model) plus viscous drag or purely strip theory
         # --- outer shell including hydro---
         stations  :  [0, 1]                   # [-]    location of stations along axis. Will be normalized such that start value maps to rA and end value to rB
-        d         :  12.5                      # [m]    diameters if circular or side lengths if rectangular (can be pairs)
-        t         :  0.05                      # [m]    wall thicknesses (scalar or list of same length as stations)
+        d         :  10.0                      # [m]    diameters if circular or side lengths if rectangular (can be pairs)
+        t         :  0.04                      # [m]    wall thicknesses (scalar or list of same length as stations)
         Cd        :  0.8                       # [-]    transverse drag coefficient       (optional, scalar or list of same length as stations)
         Ca        :  1.0                       # [-]    transverse added mass coefficient (optional, scalar or list of same length as stations)
         CdEnd     :  0.6                       # [-]    end axial drag coefficient        (optional, scalar or list of same length as stations)
@@ -1178,7 +1178,7 @@ platform:
         # --- outer shell including hydro---
         stations  :  [0, 1]                 # [-]    location of stations along axis. Will be normalized such that start value maps to rA and end value to rB
         d         :  [7.0, 12.5]               # [m]    diameters if circular or side lengths if rectangular (can be pairs)
-        t         :  0.05                      # [m]    wall thicknesses (scalar or list of same length as stations)
+        t         :  0.04                      # [m]    wall thicknesses (scalar or list of same length as stations)
         Cd        :  0.8                       # [-]    transverse drag coefficient       (optional, scalar or list of same length as stations)
         Ca        :  1.0                       # [-]    transverse added mass coefficient (optional, scalar or list of same length as stations)
         CdEnd     :  0.6                       # [-]    end axial drag coefficient        (optional, scalar or list of same length as stations)
@@ -1200,7 +1200,7 @@ platform:
         # --- outer shell including hydro---
         stations  :  [0, 1]                 # [-]    location of stations along axis. Will be normalized such that start value maps to rA and end value to rB
         d         :  [7.0, 12.5]               # [m]    diameters if circular or side lengths if rectangular (can be pairs)
-        t         :  0.05                      # [m]    wall thicknesses (scalar or list of same length as stations)
+        t         :  0.04                      # [m]    wall thicknesses (scalar or list of same length as stations)
         Cd        :  0.8                       # [-]    transverse drag coefficient       (optional, scalar or list of same length as stations)
         Ca        :  1.0                       # [-]    transverse added mass coefficient (optional, scalar or list of same length as stations)
         CdEnd     :  0.6                       # [-]    end axial drag coefficient        (optional, scalar or list of same length as stations)
@@ -1247,73 +1247,73 @@ platform:
 
 
 mooring:
-    water_depth: 200                                  # [m]       uniform water depth
+#     water_depth: 200                                  # [m]       uniform water depth
     
-    points:
-        - name: line1_anchor
-          type: fixed
-          location: [418.8, 725.38, -200.0]
-          anchor_type: drag_embedment
+#     points:
+#         - name: line1_anchor
+#           type: fixed
+#           location: [837, 0.0, -200.0]
+#           anchor_type: drag_embedment
 
-        - name: line2_anchor
-          type: fixed
-          location: [-837.6, 0.0, -200.0]
-          anchor_type: drag_embedment
+#         - name: line2_anchor
+#           type: fixed
+#           location: [-418, 725, -200.0]
+#           anchor_type: drag_embedment
 
-        - name: line3_anchor
-          type: fixed
-          location: [418.8, -725.38, -200.0]
-          anchor_type: drag_embedment
+#         - name: line3_anchor
+#           type: fixed
+#           location: [-418, -725, -200.0]
+#           anchor_type: drag_embedment
 
-        - name: line1_vessel
-          type: vessel
-          location: [20.434,    35.393,     -14.0]
+#         - name: line1_vessel
+#           type: vessel
+#           location: [55.44,    0,     -14.0]
 
-        - name: line2_vessel
-          type: vessel
-          location: [-40.868,   0.0,     -14.0]
+#         - name: line2_vessel
+#           type: vessel
+#           location: [-15.39,   46.27,     -14.0]
 
-        - name: line3_vessel
-          type: vessel
-          location: [20.434,     -35.393,     -14.0]
+#         - name: line3_vessel
+#           type: vessel
+#           location: [-15.39,  -46.27,     -14.0]
 
-    lines:
-        - name: line1
-          endA: line1_anchor
-          endB: line1_vessel
-          type: main
-          length: 835.5
+#     lines:
+#         - name: line1
+#           endA: line1_anchor
+#           endB: line1_vessel
+#           type: main
+#           length: 835.5
 
-        - name: line2
-          endA: line2_anchor
-          endB: line2_vessel
-          type: main
-          length: 835.5
+#         - name: line2
+#           endA: line2_anchor
+#           endB: line2_vessel
+#           type: main
+#           length: 835.5
 
-        - name: line3
-          endA: line3_anchor
-          endB: line3_vessel
-          type: main
-          length: 835.5
+#         - name: line3
+#           endA: line3_anchor
+#           endB: line3_vessel
+#           type: main
+#           length: 835.5
 
-    line_types:
-        - name: main
-          diameter: 0.0766
-          mass_density: 113.35
-          stiffness: 753.6e6
-          breaking_load: 1e8
-          cost: 100.0
-          transverse_added_mass: 1.0
-          tangential_added_mass: 0.0
-          transverse_drag: 1.6
-          tangential_drag: 0.1
+#     line_types:
+#         - name: main
+#           diameter: 0.0766
+#           mass_density: 113.35
+#           stiffness: 753.6e6
+#           breaking_load: 1e8
+#           cost: 100.0
+#           transverse_added_mass: 1.0
+#           tangential_added_mass: 0.0
+#           transverse_drag: 1.6
+#           tangential_drag: 0.1
 
-    anchor_types:
-        - name: drag_embedment
-          mass: 1e3
-          cost: 1e4
-          max_vertical_load: 0.0
-          max_lateral_load: 1e5
+#     anchor_types:
+#         - name: drag_embedment
+#           mass: 1e3
+#           cost: 1e4
+#           max_vertical_load: 0.0
+#           max_lateral_load: 1e5
     
 
                 

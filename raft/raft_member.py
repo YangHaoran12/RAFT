@@ -724,7 +724,7 @@ class Member:
         return mass, center, mshell, mfill, pfill
 
 
-    def getInertiaOpt(self, rPRP=np.zeros(3)):
+    def getInertiaOpt(self, rPRP=np.zeros(3), rPRPRot=np.zeros(3)):
         '''Calculates member inertia properties: mass, center of mass, moments of inertia.
         Properties are calculated relative to the platform reference point (PRP) in the
         global orientation directions.
@@ -900,7 +900,7 @@ class Member:
                     Izz = I_ax                              # circular, so the axial MoI is about the z axis
                     
                 
-                elif self.shape=='rectangular' and  abs(self.rB[2]-self.rA[2]) >= 1e-3:
+                elif self.shape=='rectangular' and  abs(self.rB0[2]-self.rA0[2]) >= 1e-3:
                     # MASS AND CENTER OF GRAVITY
                     slA = self.sl[i-1]                          # outer side lengths of the lower node, of length 2 [m]
                     slB = self.sl[i]                            # outer side lengths of the upper node, of length 2 [m]
@@ -943,7 +943,7 @@ class Member:
                     Izz_end = Izz_end_shell + Izz_end_fill
                     Izz = Izz_end       # the total MoI of the member about the z-axis is the same at any point along the z-axis
 
-                elif self.shape=='rectangular' and  abs(self.rB[2]-self.rA[2]) < 1e-3:
+                elif self.shape=='rectangular' and  abs(self.rB0[2]-self.rA0[2]) < 1e-3:
                     rA0 = np.array([(self.rB0[0] + self.rA0[0])/2, 
                                     (self.rB0[1] + self.rA0[1])/2, 
                                 (self.rA0[2] - self.sl[0,0]/2) ])
@@ -963,7 +963,7 @@ class Member:
 
                     mem_.gamma = np.arctan2(mem_.q[1], mem_.q[0])*180/np.pi
 
-                    mem_.setPosition()
+                    mem_.setPosition([*rPRP,*rPRPRot])
                     # miss xiao hua very much
                     # MASS AND CENTER OF GRAVITY
                     slA = mem_.sl[i-1]                          # outer side lengths of the lower node, of length 2 [m]
@@ -992,6 +992,7 @@ class Member:
         
                     slBi_fill = (slBi-slAi)*(l_fill/l) + slAi   # interpolated side lengths of frustum that ballast is filled to [m]
                     v_fill, hc_fill = FrustumVCV(slAi, slBi_fill, l_fill)   # volume and center of volume of inner frustum that ballast occupies [m^3]
+                    self.l_fill = v_fill / (slAi[0]*slAi[1])
                     hc_fill += self.t[i-1]
                     m_fill = v_fill*rho_fill                    # mass of ballast in the submember [kg]
                     
@@ -1040,11 +1041,11 @@ class Member:
                     # print(I_rot)
             # translate this submember's local inertia matrix to the PRP and add it to the total member's M_struc matrix
                 # center of mass of the submember from the PRP in global orientation (note: some of above could streamlined out of the if/else)
-                if not self.shape=='rectangular' or  abs(self.rB[2]-self.rA[2]) >= 1e-3:
+                if not self.shape=='rectangular' or  abs(self.rB0[2]-self.rA0[2]) >= 1e-3:
                     center = self.rA + self.q*(self.stations[i-1] + hc) - rPRP      # center of mass of the submember relative to the PRP [m]
 
             # add/append terms
-            if not self.shape=='rectangular' or  abs(self.rB[2]-self.rA[2]) >= 1e-3:
+            if not self.shape=='rectangular' or  abs(self.rB0[2]-self.rA0[2]) >= 1e-3:
                 mass_center += mass*center                  # total sum of mass the center of mass of the member [kg-m]
                 mshell += m_shell                           # total mass of the shell material only of the member [kg]
                 self.vfill.append(v_fill)                        # list of ballast volumes in each submember [m^3]
@@ -1223,6 +1224,7 @@ class Member:
         
         self.mass = mass
         self.center = center
+        self.m_shell = mshell
 
         return mass, center, mshell, mfill, pfill
 

@@ -919,7 +919,7 @@ class Rotor:
         outputs["CMhub"] = np.array([loads["CQ"][0], loads["CMy"][0], loads["CMz"][0]])
 
         # We might want to supress this print statement? Or add a verbosity option?
-        print(f"Wind speed: {Uhub:.2f} m/s, Omega: {Omega_rpm:.2f} rpm, Cp: {loads['CP'][0]:4.3f}, T: {loads['T'][0]/1e3:.0f} kN")
+        # print(f"Wind speed: {Uhub:.2f} m/s, Omega: {Omega_rpm:.2f} rpm, Cp: {loads['CP'][0]:4.3f}, T: {loads['T'][0]/1e3:.0f} kN")
         
         # save select derivatives
         J={} # Jacobian/derivatives
@@ -1012,7 +1012,7 @@ class Rotor:
         # Set up vectors in axis frame. Assuming CCBlade forces (but not 
         # moments) are relative to the rotor axis
         forces_axis = np.array([loads["T"][0], loads["Y"][0], loads["Z" ][0]])
-        moments_axis = np.array([loads["My"][0], loads["Q"][0], loads["Mz"][0]])        
+        moments_axis = np.array([loads["Q"][0], loads["My"][0], loads["Mz"][0]])        
         
         # Rotate forces and moments to be relative to global orientation (but still wrt hub)
         self.f0[:3] = np.matmul(self.R_q, forces_axis)
@@ -1221,7 +1221,7 @@ class Rotor:
             for j in range(npts):
                 X.append(self.ccblade.chord[i]*afx[j])
                 Y.append(self.ccblade.chord[i]*afy[j])
-                Z.append(self.ccblade.r[i])            
+                Z.append(self.ccblade.r[i]+ self.Rhub)            
                 
         P = np.array([X, Y, Z])  # coordinates of blade chord sections
         
@@ -1266,13 +1266,14 @@ class Rotor:
         # ----- Also draw a circle -----
         if draw_circle:
             r = self.ccblade.r[-1]
+            # r = 63
             
             # lists to be filled with coordinates for plotting
             X=[]
             Y=[]
             Z=[]
             
-            n = 24                      # number of sides for a circle
+            n = 48                      # number of sides for a circle
             for i in range(n+1):
                 y = np.cos(float(i)/float(n)*2.0*np.pi)    # x coordinates of a unit circle
                 z = np.sin(float(i)/float(n)*2.0*np.pi)    # y

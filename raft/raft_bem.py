@@ -280,7 +280,7 @@ class BEMSolver(object):
         Wamit1File = os.path.join(WamitDir, FileName + '.1')
         Wamit3File = os.path.join(WamitDir, FileName + '.3')
 
-        Acoef, Bcoef, w1 = readWamit1(Wamit1File)
+        Acoef, Bcoef, w1 = readWamit1PWD(Wamit1File)
 
         if any(w1 == 0.0) and any(w1 == np.inf):
             w1 = np.concatenate(([0.], w1[1:-1], [w1[-2]+0.1]))
@@ -288,7 +288,7 @@ class BEMSolver(object):
         self.A = self.rho*Acoef
         self.B = self.rho*w1[:, np.newaxis, np.newaxis]*Bcoef
 
-        mod, phase, real, imag, w3, headings = readWamit3(Wamit3File)
+        mod, phase, real, imag, w3, headings = readWamit3PWD(Wamit3File)
 
         self.M = mod*self.rho*self.g
         self.P = phase
@@ -302,8 +302,8 @@ class CapytaineSolver(BEMSolver):
 
     def __init__(self, 
                  memList: Iterable[Member], 
-                 wMin=0.0618, 
-                 wMax=6.18, 
+                 wMin=0.01*np.pi, 
+                 wMax=1.0*np.pi, 
                  nw=10, 
                  headings=[0], 
                  cog=[0, 0, 0], 
@@ -436,7 +436,7 @@ class CapytaineSolver(BEMSolver):
         dataset = assemble_dataset(results)
 
         if self.problems0andInf is not None:
-            results0andInf = BEMSolver().solve_all(problems=self.problems0andInf, n_jobs=4)
+            results0andInf = BEMSolver().solve_all(problems=self.problems0andInf, n_jobs=nThreads)
             dataset0andInf = assemble_dataset(results0andInf)
 
             dataset0andInf = dataset0andInf.assign_coords(water_depth = self.waterDepth,  # assign water_depth for w = 0 and inf to self.waterDepth
@@ -467,6 +467,9 @@ class CapytaineSolver(BEMSolver):
 
             Fexc = self.dataset['excitation_force'].data[1:-1] # mannually remove nan in 0 and inf frequency 
 
+        else:
+            Fexc = self.dataset['excitation_force'].data
+        
         M = np.abs(Fexc)
         P = np.angle(np.conj(Fexc), deg=True)
         R = np.real(Fexc)
@@ -481,6 +484,48 @@ class CapytaineSolver(BEMSolver):
 
     def writeWamit(self, projectDir=None, WamitFile='Platform'):
         projectDir = os.path.join(raft_dir, projectDir)
+        
+        os.makedirs(projectDir, exist_ok=True)
+        
+        f = open(os.path.join(projectDir, WamitFile+'.1'), 'w')
+
+        if self.include0andInf:
+            for i in range(6):
+                for j in range(6):
+
+                    f.write(f'{0.0:>13.6E}    {i+1:>4}    {j+1:>4}    {self.A[0,i,j]/self.rho:>13.6E} \n')
+
+            for i in range(6):
+                for j in range(6):
+
+                    f.write(f'{-1.0:>13.6E}    {i+1:>4}    {j+1:>4}    {self.A[-1,i,j]/self.rho:>13.6E} \n')
+
+
+        for iw, w in enumerate(self.w):
+            if self.include0andInf:
+                iw += 1
+            for i in range(6):
+                for j in range(6):
+
+                    f.write(f'{w:>13.6E}    {i+1:>4}    {j+1:>4}    {self.A[iw,i,j]/self.rho:>13.6E}    {self.B[iw,i,j]/self.rho/w:>13.6E} \n')
+        f.close()
+
+        f = open(os.path.join(projectDir, WamitFile+'.3'), 'w')
+
+        for iw, w in enumerate(self.w):
+            for ih, h in enumerate(self.headings):
+                for i in range(6):
+                    
+                    f.write(f'{w:>13.6E}    '
+                            f'{h:>13.6E}    '
+                            f'{i+1:>4}    '
+                            f'{self.M[iw,ih,i]/self.rho/self.g:>13.6E}    '
+                            f'{self.P[iw,ih,i]:>13.6E}    ' # convert rad to degree using a less accurate method
+                            f'{self.R[iw,ih,i]/self.rho/self.g:>13.6E}    '
+                            f'{self.I[iw,ih,i]/self.rho/self.g:>13.6E} \n')
+        f.close()
+
+    def writeWamitPWD(self, projectDir=None, WamitFile='Platform'):
         
         os.makedirs(projectDir, exist_ok=True)
         
@@ -711,6 +756,87 @@ def readWamit3(Wamit3File):
     '''
     
     Wamit3File = os.path.normpath(os.path.join(raft_dir, Wamit3File))
+    wamit3 = np.loadtxt(Wamit3File)
+
+    # Get unique frequencies and index vector
+    iw = np.argsort(np.unique(wamit3[:,0]))
+    ih = np.argsort(np.unique(wamit3[:,1]))
+
+    nfreq = len(iw)
+    nheadings = len(ih)
+
+    w = wamit3[:,0][::6*nheadings][iw]
+    headings = wamit3[:,1][0:6*nheadings:6][ih]
+        
+    # headings, ih = np.unique(wamit3[:,1], return_inverse=True)
+    # nhead = len(headings)
+
+    modCol   = wamit3[:,3]
+    phaseCol = wamit3[:,4]
+    realCol  = wamit3[:,5]
+    imagCol  = wamit3[:,6]
+    
+    mod   = modCol.reshape(nfreq, nheadings, 6)[iw][:,ih,:]
+    phase = phaseCol.reshape(nfreq, nheadings, 6)[iw][:,ih,:]
+    real  = realCol.reshape(nfreq, nheadings, 6)[iw][:,ih,:]
+    imag  = imagCol.reshape(nfreq, nheadings, 6)[iw][:,ih,:]
+    
+    return mod, phase, real, imag, w, headings
+
+def readWamit1PWD(Wamit1File):
+    '''
+    Read added mass and damping from .1 file (WAMIT format)
+
+    Parameters
+    ----------
+    Wamit1File: str, os.path
+        Wamit .1 file
+    '''
+    Wamit1File = os.path.normpath(Wamit1File)
+    # Check if the file contains the infinite and zero frequency points
+    try:
+        # extract the first 72 rows to see how many are infinite and zero
+        freq_test = np.loadtxt(Wamit1File, usecols=(0,1,2,3), max_rows=73)  # add one extra (73) for formatting/syntax
+        # find the row in the file that is not a zero or infinite frequency
+        for i in range(len(freq_test)):     
+            if freq_test[i,0] != 0.0 and freq_test[i,0] != -1.0:
+                break
+        # create new arrays based on the number of nonzero values in the matrices
+        inf_zero_freqs = np.loadtxt(Wamit1File, usecols=(0,1,2,3), max_rows=i)
+        other_freqs = np.loadtxt(Wamit1File, usecols=(0,1,2,3,4), skiprows=i)
+        
+        zero_freq   = np.c_[inf_zero_freqs[:36], np.zeros(36)]
+        
+        inf_freq   = np.c_[inf_zero_freqs[36:], np.zeros(36)] # force Raidation damping coefficient Bij^hat in 0 and inf frequncy to be 0, for interpolation convenience
+        inf_freq[:, 0] = np.inf # set inf_freq to np.inf
+        
+        wamit1      = np.vstack((zero_freq, other_freqs, inf_freq))
+    except:
+        wamit1 = np.loadtxt(Wamit1File)
+    # Get unique frequencies in a sorted order
+    iw = np.argsort(np.unique(wamit1[:,0]))
+    w = wamit1[:,0][::36][iw]
+    nfreq = len(w)
+
+    addedMassCol = wamit1[:,3]
+    dampingCol   = wamit1[:,4]
+
+    ACoef = addedMassCol.reshape(nfreq, 36).reshape((nfreq,6,6))[iw]
+    BCoef = dampingCol.reshape(nfreq, 36).reshape((nfreq,6,6))[iw]
+
+    return ACoef, BCoef, w
+
+def readWamit3PWD(Wamit3File):
+    '''
+    Read excitation force coefficients from .3 file (WAMIT format)
+
+    Parameters
+    ----------
+    Wamit1File: str, os.path
+        Wamit .3 file
+    '''
+    
+    Wamit3File = os.path.normpath(Wamit3File)
     wamit3 = np.loadtxt(Wamit3File)
 
     # Get unique frequencies and index vector
