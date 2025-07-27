@@ -96,7 +96,9 @@ class BEMSolver(object):
                                           sizeMax=sizeMax,
                                           constraint=constraint,
                                           recombined=True,
-                                          clip=True
+                                          clip=True,
+                                          show=False,
+                                          structured=True
                                           )
             else:
                 self.mesh = platformMesh(members=memList,
@@ -104,7 +106,8 @@ class BEMSolver(object):
                                          sizeMax=sizeMax,
                                          constraint=constraint,
                                          recombined=True,
-                                         clip=True
+                                         clip=True,
+                                         structured=True
                                         )
         else:
 

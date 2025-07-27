@@ -281,6 +281,10 @@ def solveTwrFEA(fowt:FOWT, case, plot=True):
                 ax[2].plot(mem.ls[1:], Dz, label='Dz')
                 ax[2].grid()
                 ax[2].legend()
+
+                print(f'node Dispx of top = {Dx[-1]:.4e}')
+                print(f'node Dispy of top = {Dy[-1]:.4e}')
+                print(f'node Dispz of top = {Dz[-1]:.4e}')
         
                 return ax
             
@@ -1218,7 +1222,7 @@ def solveTwrOpensees(fowt:FOWT, case, plot=True):
             f_aero_twr_top[ir] = transformForce(f_aero0[ir,:], offset=(rot.r_hub_rel-mem.rB))
             f_aero_twr_top[ir] += transformForce([0,0,-rot.mRNA * fowt.g,0,0,0], offset=(rot.r_CG_rel-mem.rB))
 
-        nelem = 40
+        nelem = 20
         nelem_cable = 1
 
         mem0 = fowt.memberList[fowt.nplatmems]
@@ -1252,16 +1256,10 @@ def solveTwrOpensees(fowt:FOWT, case, plot=True):
         # ops add transform
 
         axis1 = [-1,0,0]
-
-        # axis1 = np.cross([1,0,0], rTwr1)
-        # axis1 = axis1 / np.linalg.norm(axis1)
         
-        # axis2 = np.cross([-1,0,0], rTwr2)
-        # axis2 = axis2 / np.linalg.norm(axis2)
+        # ops.geomTransf('Linear', 1, *axis1)
+        ops.geomTransf('Corotational', 1, *axis1)
         
-        # axis3 = [0, 0, 1]
-        
-        ops.geomTransf('Linear', 1, *axis1)
 
         ops.timeSeries('Constant', 1)
         ops.pattern('Plain', 1, 1)
@@ -1275,7 +1273,7 @@ def solveTwrOpensees(fowt:FOWT, case, plot=True):
             sec_prop[i] = [A0, Iy0, Iz0, J0, d_node[i], t_node[i]]
 
             ops.section('Elastic', i+1, E,A, Iz, Iy, G, J)
-            ops.beamIntegration('Lobatto', i+1, i+1, 5)
+            ops.beamIntegration('Legendre', i+1, i+1, 2)
 
             g = -9.81
             Cd = 1.0
@@ -1317,10 +1315,19 @@ def solveTwrOpensees(fowt:FOWT, case, plot=True):
         ops.analyze(1)
 
         tmp = ops.nodeDisp(nelem+1)[:3]
-        print(f'node Dispx of top = {tmp[0]:.3e}')
+        print(f'node Dispx of top = {tmp[0]:.4e}')
+        print(f'node Dispy of top = {tmp[1]:.4e}')
+
+
         def calc_stress(ele=0, secType='circular', n=200, plot_stress=True):
             
             Fx, Fy, Fz, Mx, My, Mz = ops.eleResponse(ele+1, 'localForce')[:6]
+
+            print(f'base Fx = {Fz:.4e}')
+            print(f'base Fy = {Fy:.4e}')
+            
+            print(f'base Mx = {Mz:.4e}')
+            print(f'base My = {My:.4e}')
 
             A, Iy, Iz, J, d, t = sec_prop[ele,:]
 
@@ -1331,7 +1338,7 @@ def solveTwrOpensees(fowt:FOWT, case, plot=True):
             #     NotImplementedError()
             r = 0.5*d
 
-            def compute_vom_mises(r, theta):
+            def compute_vom_mises(theta, r):
                 """
                 Compute the second deviatoric stress invariant J2 from a stress tensor 
                 given in Voigt notation (assuming shear components are not multiplied by 2).
@@ -1351,8 +1358,12 @@ def solveTwrOpensees(fowt:FOWT, case, plot=True):
                 sigma_yy = 0
                 sigma_zz = 0  
 
-                sigma_xy = Fy/(0.25*np.pi*d**2)/2/t
-                sigma_xz = Fz/(0.25*np.pi*d**2)/2/t
+                # sigma_xy = Fy/(0.25*np.pi*d**2)/2/t
+                # sigma_xz = Fz/(0.25*np.pi*d**2)/2/t
+                Qz = r**2*t*np.cos(theta)
+                Qy = r**2*t*np.sin(theta)
+                sigma_xy = Fy*Qz/Iz/t
+                sigma_xz = Fz*Qy/Iy/t
                 sigma_yz = Mx*r/J
                 
                 s = np.zeros(6)
@@ -1364,13 +1375,23 @@ def solveTwrOpensees(fowt:FOWT, case, plot=True):
                             2 * (s[3]**2 + s[4]**2 + s[5]**2))
                 
                 von_mises = np.sqrt(3*J2)
+                # von_mises = Qy
                 
                 return von_mises
 
-            alpha = np.arctan2(-My/Iz, Mz/Iy)
+            # alpha = np.arctan2(-My/Iz, Mz/Iy)
             # alpha = np.arctan2(Mz/Iy, My/Iz)
 
-            max_von_mises = compute_vom_mises(r, alpha)
+            from scipy.optimize import minimize_scalar
+            def objective_function(theta_rad, *args):
+
+                return -compute_vom_mises(theta_rad, *args)
+            
+            result = minimize_scalar(objective_function, bounds=(0, 2 * np.pi), method='bounded', args=r)
+            
+            alpha = result.x
+            max_von_mises = compute_vom_mises(result.x, r)
+            # max_von_mises1 = compute_vom_mises(alpha, r)
 
             if plot_stress:
                 from mpl_toolkits.mplot3d import Axes3D
@@ -1380,7 +1401,7 @@ def solveTwrOpensees(fowt:FOWT, case, plot=True):
 
                 theta = np.linspace(0, np.pi*2, n, endpoint=True)
 
-                von_mises = [compute_vom_mises(r, theta[i]) for i in range(n)]
+                von_mises = [compute_vom_mises(theta[i], r) for i in range(n)]
 
                 factor = 10
                 pts_out = np.array([r*np.cos(theta), r*np.sin(theta)])
@@ -1450,14 +1471,14 @@ def solveTwrOpensees(fowt:FOWT, case, plot=True):
         # eigenvals = ops.eigen(num_modes)
         # freqs = [np.sqrt(lam)/(2*np.pi) for lam in eigenvals]
 
-        print("\nFrequency(Hz):")
-        for i, f in enumerate(freqs):
-            print(f"Mode {i+1}: {f:.4f} Hz")
+        # print("\nFrequency(Hz):")
+        # for i, f in enumerate(freqs):
+        #     print(f"Mode {i+1}: {f:.4f} Hz")
 
         import opsvis as opsv
         fmt_defo = {'color': 'blue', 'linestyle': 'solid', 'linewidth': 3.0,
             'marker': '', 'markersize': 6}
-        opsv.plot_mode_shape(6, interpFlag=1, fmt_defo=fmt_defo)
+        opsv.plot_mode_shape(2, interpFlag=1, fmt_defo=fmt_defo)
         plt.show()
         a = 1   
 
@@ -1545,9 +1566,14 @@ def solveTwrCombinationOpensees(fowt:FOWT, case, plot=True, nelem=20):
         
         axis3 = [0, 0, 1]
 
-        ops.geomTransf('PDelta', 1, *axis1)
-        ops.geomTransf('PDelta', 2, *axis2)  
-        ops.geomTransf('PDelta', 3, *axis3) 
+        # ops.geomTransf('PDelta', 1, *axis1)
+        # ops.geomTransf('PDelta', 2, *axis2)  
+        # ops.geomTransf('PDelta', 3, *axis3) 
+
+        ops.geomTransf('Corotational', 1, *axis1)
+        ops.geomTransf('Corotational', 2, *axis2)  
+        ops.geomTransf('Corotational', 3, *axis3)
+        
 
         # load patern
         ops.timeSeries('Constant', 1)
@@ -2221,9 +2247,9 @@ def adjust_ballast_opt_up(fowt:FOWT, l_fill=0.01, iter=100):
             fowt_.calcStatics()
             xCG = fowt_.rCG[0]
             xCB = fowt_.rCB[0]
-            offset = abs(xCG - xCB)
+            offset = xCG - xCB
             
-            if abs(offset < 1e-2) or offset * offset0 < 0:
+            if abs(offset) < 1e-2 or offset * offset0 < 0:
                 print(f'balanced after {i+1} iterations')
                 print(f'{l_fill *(i+1) * fowt_.memberList[4].sl[0,0]* fowt_.memberList[4].sl[0,1] * fowt_.rho_water / 1e3:.2f} t mass has been balanced')
                 print(f'{l_fill *(i+1)} m ballast has been balanced')
@@ -2380,9 +2406,13 @@ def solveTwrCombinationSpectrumOpensees(fowt:FOWT, case, plot=True, nelem=20, di
         
         axis3 = [0, 0, 1]
 
-        ops.geomTransf('PDelta', 1, *axis1)
-        ops.geomTransf('PDelta', 2, *axis2)  
-        ops.geomTransf('PDelta', 3, *axis3) 
+        # ops.geomTransf('PDelta', 1, *axis1)
+        # ops.geomTransf('PDelta', 2, *axis2)  
+        # ops.geomTransf('PDelta', 3, *axis3) 
+
+        ops.geomTransf('Corotational', 1, *axis1)
+        ops.geomTransf('Corotational', 2, *axis2)  
+        ops.geomTransf('Corotational', 3, *axis3) 
 
         sec_prop = np.zeros([nelem, 6])
         # ops add elements
@@ -2603,8 +2633,8 @@ def solveTwrCombinationSpectrumOpensees(fowt:FOWT, case, plot=True, nelem=20, di
         
         ops.modalProperties("-print", "-file", "ModalReport.txt", "-unorm")
 
-        filename = 'ele_1_sec_1.txt'
-        ops.recorder('Element', '-xml', filename, '-closeOnWrite', '-precision', 4, '-ele', 1, 'localForce')
+        # filename = 'ele_1_sec_1.txt'
+        # ops.recorder('Element', '-xml', filename, '-closeOnWrite', '-precision', 4, '-ele', 1, 'localForce')
         # ops.recorder('Node', '-file', 'ele_1_sec_2.txt', '-closeOnWrite', '-precision', 4, '-node', 1, 'reaction')
         
         
@@ -2983,3 +3013,318 @@ def solveTwrCombinationSpectrumOpensees(fowt:FOWT, case, plot=True, nelem=20, di
         else:
 
             return von_mises_bot, cable_tension[0], freqs
+        
+
+
+
+def solveTwrCombinationOpenseesCoupled(fowt:FOWT, case, nelem=20, r6=np.zeros(6)):
+        '''Calculate and output tower bending moment without considering paltform (considering FOWT in a psuedo
+        'static' condition) in order to optimize Nezzy2-like twin-rotor FOWT.
+
+        Input:
+            fowt (raft_fowt.FOWT): a deepcopy of FOWT instance
+            case (case)
+            pitch (rad)
+
+        Output:
+            Mbase_list (np.array([3, nrotors]))
+
+        '''     
+        import openseespy.opensees as ops
+
+        fowt.setPosition(r6)
+        # fowt.calcTurbineConstants(case, ptfm_pitch=r6[4])
+        # fowt.calcTowerAeroLoads(case)
+
+        f_aero0 = np.zeros([fowt.ntowers, 6])
+        f_aero_twr_top = np.zeros([fowt.ntowers, 6])
+
+        E = 210*1e9        # Modulus of elasticity (Pa)
+        G = 80.8*1e9       # Shear modulus of elasticity (Pa)
+        nu = 0.3           # Poisson's ratio
+        rho = 8500         # Density (kg/m**3)
+
+        ops.wipe()
+        ops.model('basic', '-ndm', 3, '-ndf', 6)
+
+
+        for ir, rot in enumerate(fowt.rotorList):
+
+            mem = fowt.memberList[fowt.nplatmems + ir]
+            # mem.setPosition(r6=[0,0,0,0,fowt.r6[4],0])
+
+            f_aero0[ir,:], _, _, _ = rot.calcAero(case, current=False)
+
+            # counter-clockwise rotating rotor
+            # An approximate method (needs update)
+            if ir == 1:
+                  f_aero0[ir,1] = - f_aero0[ir,1]
+                  f_aero0[ir,3] = - f_aero0[ir,3]
+                  f_aero0[ir,5] = - f_aero0[ir,5]
+
+            f_aero_twr_top[ir] = transformForce(f_aero0[ir,:], offset=(rot.r_hub_rel-mem.rB))
+            f_aero_twr_top[ir] += transformForce([0,0,-rot.mRNA * fowt.g,0,0,0], offset=(rot.r_CG-mem.rB))
+
+        mem0 = fowt.memberList[fowt.nplatmems]
+        mem1 = fowt.memberList[fowt.nplatmems+1]
+
+        rTwr1 = mem0.rB - mem0.rA
+        rTwr2 = mem1.rB - mem1.rA
+
+        r_node_twr1 = np.zeros([nelem+1,3])
+        r_node_twr2 = np.zeros([nelem+1,3])
+
+        d_node = np.linspace(mem0.d[0], mem0.d[-1], nelem+1, endpoint=True)
+        t_node = np.linspace(mem0.t[0], mem0.t[-1], nelem+1, endpoint=True)
+
+        # ops add nodes
+        for i, n in enumerate(np.linspace(0,1,nelem+1, endpoint=True)):
+            r_node_twr1[i] = mem0.rA + n * rTwr1
+            r_node_twr2[i] = mem1.rA + n * rTwr2
+        
+        r_node = np.concatenate([r_node_twr1, r_node_twr2[1:]], axis=0)
+
+        for inode, r in enumerate(r_node):    
+            
+            ops.node(inode+1, r[0], r[1], r[2])
+
+        # ops fix bottom
+        ops.fix(1, 1,1,1, 1,1,1)
+            
+        # ops add transform
+        axis1 = np.cross(-mem0.p2, rTwr1)
+        axis1 = axis1 / np.linalg.norm(axis1)
+        R1 = rotationMatrix(rTwr1, ref=mem0.p2)
+        
+        axis2 = np.cross(-mem1.p2, rTwr2)
+        axis2 = axis2 / np.linalg.norm(axis2)
+        R2 = rotationMatrix(rTwr2, ref=mem1.p2)
+        
+        axis3 = [0, 0, 1]
+
+        ops.geomTransf('Corotational', 1, *axis1)
+        ops.geomTransf('Corotational', 2, *axis2)  
+        ops.geomTransf('Corotational', 3, *axis3)
+        
+
+        # load patern
+        ops.timeSeries('Constant', 1)
+        ops.pattern('Plain', 1, 1)
+
+        sec_prop = np.zeros([nelem, 6])
+        # ops add elements
+        for i in range(nelem):
+            A0, Iy0, Iz0, J0 = section_property(d_node[i], t_node[i])
+            A1, Iy1, Iz1, J1 = section_property(d_node[i+1], t_node[i+1])
+
+            A, Iy, Iz, J = np.array([A0+A1, Iy0+Iy1, Iz0+Iz1, J0+J1])/2
+            sec_prop[i] = [A0, Iy0, Iz0, J0, d_node[i], t_node[i]]
+
+            ops.section('Elastic', i+1, E,A, Iz, Iy, G, J)
+            ops.beamIntegration('Lobatto', i+1, i+1, 5)
+
+            g = -9.81
+            Cd = 1.0
+            hHub = fowt.rotorList[0].hHub
+            v = case['wind_speed'] * (r_node[i, 2]/hHub)**fowt.shearExp_air
+
+            v1 = R1.T @ np.array([v,0,0])
+            v2 = R2.T @ np.array([v,0,0])
+
+            tmp = R1.T @  np.array([0,0,-1])
+
+            dis_load_twr1 = R1.T @ (np.array([0, 0, g*rho*A])) + np.array([0,-1*0.5*1.225*v1[1]**2*d_node[i]*Cd,0])
+            dis_load_twr2 = R2.T @ (np.array([0, 0, g*rho*A])) + np.array([0,0.5*1.225*v2[1]**2*d_node[i]*Cd,0])
+            
+            ops.element('dispBeamColumn', i+1, i+1, i+2, 1, i+1, '-cMass', '-mass', rho*A)
+
+            # ops.element('elasticBeamColumn', i+1, i+1, i+2, A, E, G, J, Iy, Iz, 1, '-mass', rho*A, '-cMass')
+            ops.eleLoad('-ele', i+1, '-type','-beamUniform', dis_load_twr1[1], dis_load_twr1[2], dis_load_twr1[0])
+
+            if i == 0:
+                ops.element('dispBeamColumn', i+nelem+1, i+1, i+nelem+2, 2, i+1, '-cMass', '-mass', rho*A)
+                # ops.element('elasticBeamColumn', i+nelem+1, i+1, i+nelem+2, A, E, G, J, Iy, Iz, 2, '-mass', rho*A, '-cMass')
+
+                ops.eleLoad('-ele', i+nelem+1, '-type','-beamUniform', dis_load_twr2[1], dis_load_twr2[2], dis_load_twr2[0])
+            else:
+                ops.element('dispBeamColumn', i+nelem+1, i+nelem+1, i+nelem+2, 2, i+1, '-cMass', '-mass', rho*A)
+                # ops.element('elasticBeamColumn', i+nelem+1, i+nelem+1, i+nelem+2, A, E, G, J, Iy, Iz, 2, '-mass', rho*A, '-cMass')
+
+                ops.eleLoad('-ele', i+nelem+1, '-type','-beamUniform', dis_load_twr2[1], dis_load_twr2[2], dis_load_twr2[0])
+                # print(f'node1:{i+nelem+1},  node2:{i+nelem+2}')
+        
+        # add truss element representing cable
+        A1 = 0.25*np.pi*0.30**2
+        A2 = 0.25*np.pi*0.25**2
+        ops.uniaxialMaterial('Elastic', 200, E)
+        ops.element('corotTruss', 1000, nelem+1, 2*nelem+1, A1, 200, '-rho', rho*1e-12)
+        ops.element('corotTruss', 1001, (nelem+3)//2, (nelem+3)//2+nelem, A2, 200, '-rho', rho*1e-12)
+        
+        # addition mass and inertia from naccele and rotor
+        mass_trans = 3.5e5
+        inertia1 = 4.37e7
+        inertia2 = 2.353e7
+        inertia3 = 2.542e7
+
+        ops.mass(nelem+1, mass_trans, mass_trans, mass_trans, inertia1, inertia2, inertia3)
+        ops.mass(2*nelem+1, mass_trans, mass_trans, mass_trans, inertia1, inertia2, inertia3)
+        
+        ops.system('BandGeneral')
+        ops.numberer('RCM')
+        ops.constraints('Plain')
+        ops.test('NormDispIncr', 1e-9, 100)
+        ops.algorithm('KrylovNewton')
+        ops.integrator('LoadControl', 1.0)
+        ops.analysis('Static')
+
+        # rotor load
+        ops.load(nelem+1, *f_aero_twr_top[0])
+        ops.load(2*nelem+1, *f_aero_twr_top[1])
+
+        import opsvis as opsv    
+
+        ops.analyze(1)
+        twr_top_disp_x = ops.nodeDisp(nelem+1)[0]
+        print(f'node Dispx of top = {twr_top_disp_x:.3e}')
+
+        twr_top_disp_y = ops.nodeDisp(nelem+1)[1]
+        print(f'node Dispx of top = {twr_top_disp_y:.3e}')
+
+        
+        sigma_cable1 = ops.eleResponse(1000, 'forces')[1] / A1
+        sigma_cable2 = ops.eleResponse(1001, 'forces')[1] / A2
+        print(f'cable1 stress = {sigma_cable1/1e6:.3e} Mpa')
+        print(f'cable2 stress = {sigma_cable2/1e6:.3e} Mpa')
+        # print(f'node Dispx of top = {ops.nodeDisp(2*nelem+1)[0]:.3e}')
+
+        # F_TB = -1 * (ops.eleResponse(1, 'forces')[:6] + ops.eleResponse(1+nelem, 'forces')[:6])
+        F_TB_1 = -1 * np.array(ops.eleResponse(1, 'forces')[:6])
+        F_TB_2 = -1 * np.array(ops.eleResponse(nelem+1, 'forces')[:6])
+
+        F_TB = F_TB_1 + F_TB_2
+
+        def calc_stress(ele=0, secType='circular', n=200, plot_stress=True):
+            
+            Fx, Fy, Fz, Mx, My, Mz = ops.eleResponse(ele+1, 'localForce')[:6]
+
+            A, Iy, Iz, J, d, t = sec_prop[ele,:]
+
+            # if secType == 'circular':
+            #     Sz = Sy = 2 * ((d-t)/2)**2 * t
+            #     y = z = 0.5*d
+            # elif secType == 'ellipse':
+            #     NotImplementedError()
+            r = 0.5*d
+
+            def compute_vom_mises(r, theta):
+                """
+                Compute the second deviatoric stress invariant J2 from a stress tensor 
+                given in Voigt notation (assuming shear components are not multiplied by 2).
+
+                Parameters:
+                    sigma_voigt: array-like of length 6
+                        The stress tensor in Voigt notation: [σ_xx, σ_yy, σ_zz, σ_yz, σ_xz, σ_xy]
+
+                Returns:
+                    J2: float
+                        The second invariant of the deviatoric stress tensor
+                """
+                y = r*np.cos(theta)
+                z = r*np.sin(theta)
+
+                sigma_xx = Fx/A - My*z/Iy + Mz*y/Iz
+                sigma_yy = 0
+                sigma_zz = 0  
+
+                sigma_xy = Fy/(0.25*np.pi*d**2)/2/t
+                sigma_xz = Fz/(0.25*np.pi*d**2)/2/t
+                sigma_yz = Mx*r/J
+                
+                s = np.zeros(6)
+                mean_stress = np.mean([sigma_xx, sigma_yy, sigma_zz])
+                s[:3] = np.array([sigma_xx, sigma_yy, sigma_zz]) - mean_stress
+                s[3:] = np.array([sigma_xy, sigma_xz, sigma_yz])
+
+                J2 = 0.5 * (s[0]**2 + s[1]**2 + s[2]**2 +
+                            2 * (s[3]**2 + s[4]**2 + s[5]**2))
+                
+                von_mises = np.sqrt(3*J2)
+                
+                return von_mises
+
+            alpha = np.arctan2(-My/Iz, Mz/Iy)
+            # alpha = np.arctan2(Mz/Iy, My/Iz)
+
+            max_von_mises = compute_vom_mises(r, alpha)
+
+            if plot_stress:
+                from mpl_toolkits.mplot3d import Axes3D
+                from matplotlib import cm
+                from matplotlib.patches import Polygon
+                from matplotlib.collections import PatchCollection
+
+                theta = np.linspace(0, np.pi*2, n, endpoint=True)
+
+                von_mises = [compute_vom_mises(r, theta[i]) for i in range(n)]
+
+                factor = 10
+                pts_out = np.array([r*np.cos(theta), r*np.sin(theta)])
+                pts_in = np.array([(r-t*factor)*np.cos(theta), (r-t*factor)*np.sin(theta)])
+
+                patches = []
+                colors = []
+
+                for i in range(n-1):
+                    quad = [pts_in[:,   i].tolist(), 
+                            pts_in[:, i+1].tolist(), 
+                            pts_out[:,i+1].tolist(), 
+                            pts_out[:,  i].tolist()]
+
+                    polygon = Polygon(quad, closed=True)
+                    patches.append(polygon)
+                    colors.append(von_mises[i])
+
+                fig, ax = plt.subplots(figsize=(6,6))
+                p = PatchCollection(patches, cmap='coolwarm', edgecolor='k', alpha=0.9, linewidth=0.0)
+                p.set_array(np.array(colors))
+                ax.add_collection(p)
+                fig.colorbar(p, ax=ax, label='Shear Stress')
+
+                ax.set_aspect('equal')
+                ax.set_xlim(-1.2*r, 1.2*r)
+                ax.set_ylim(-1.2*r, 1.2*r)
+                ax.set_title('Thin-Walled Circular Section with Shear Stress Distribution')
+
+            
+            return max_von_mises
+        
+
+        von_mises_TB = calc_stress(0, plot_stress=False)
+        # plt.show()
+        # eigen anlysis
+        num_modes = 6
+        eigenvals = ops.eigen(num_modes)
+        freqs = [np.sqrt(lam)/(2*np.pi) for lam in eigenvals]
+
+        print("\nFrequency(Hz):")
+        for i, f in enumerate(freqs):
+            print(f"Mode {i+1}: {f:.4f} Hz")
+        
+        # mod = np.zeros([num_modes, 2*nelem+1, 6])
+        # disp = np.zeros([2*nelem+1, 6])
+        # cable_tension = np.zeros(2)
+
+        # for i in range(2*nelem+1):
+        #     for j in range(num_modes):
+        #         mod[j,i,:] = ops.nodeEigenvector(i+1, j+1)
+        #         # mod[j,i,3:] = mod[j,i,3:] * 180/np.pi
+            
+        #     disp[i] = ops.nodeDisp(i+1)
+        #     # disp[i,3:] = disp[i,3:] * 180/np.pi
+        
+        # # tmp = ops.eleForce(1000)
+        # cable_tension[0] = ops.eleForce(1000, 2)
+        # cable_tension[1] = ops.eleForce(1001, 2)
+
+       
+        return F_TB, von_mises_TB, twr_top_disp_x, freqs

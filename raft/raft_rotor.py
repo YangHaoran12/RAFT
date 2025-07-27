@@ -278,7 +278,7 @@ class Rotor:
 
 
         # Set discretization parameters
-        nSector = getFromDict(turbine['blade'][ir], 'nSector', default=4) # number of equally spaced azimuthal positions for CCblade to compute and average over
+        nSector = getFromDict(turbine['blade'][ir], 'nSector', default=4, dtype=int) # number of equally spaced azimuthal positions for CCblade to compute and average over
         nr = getFromDict(turbine['blade'][ir], 'nr', dtype=int, default=20) # number of radial blade stations (or blade elements) to use
         
         grid = np.linspace(0., 1., nr, endpoint=False) + 0.5/nr # equally spaced grid along blade span, root=0 tip=1
@@ -432,8 +432,9 @@ class Rotor:
         
         # Set absolute hub coordinate [m] for use in various aero/hydro calcs
         self.r3 = r6[:3] + self.r_hub_rel  
-        if hasattr(self, 'ccblade'):
-            self.ccblade.hubHt = self.r3[2]
+        self.r_CG = r6[:3] + self.r_CG_rel 
+        # if hasattr(self, 'ccblade'):
+        #     self.ccblade.hubHt = self.r3[2]
 
         
     
@@ -1257,7 +1258,7 @@ class Rotor:
             else:  # normal 3d case
                 # drawing airfoils                            
                 if airfoils:
-                    for ii in range(m-1):
+                    for ii in range(m):
                         ax.plot(P2[0, npts*ii:npts*(ii+1)], P2[1, npts*ii:npts*(ii+1)], P2[2, npts*ii:npts*(ii+1)], color=color, lw=0.4)  
                 # draw outline
                 ax.plot(P2[0, 0:-1:npts], P2[1, 0:-1:npts], P2[2, 0:-1:npts], color=color, lw=0.4, zorder=zorder) # leading edge  
@@ -1771,7 +1772,7 @@ class Rotor:
 
         gmsh.finalize()
 
-    def bladdeGeo2AbsPts(self, 
+    def bladeGeo2AbsPts(self, 
                          geometry_table=np.ndarray, 
                          pitch=0., # deg 
                          meshDir=os.path.join(raft_dir, "blade_mesh/blade.msh")

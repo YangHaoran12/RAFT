@@ -1119,7 +1119,16 @@ class platformMesh:
     
 class sPlatformMesh(platformMesh): # single platform mesh, all members are attached together in Gmsh process
 
-    def __init__ (self, mainMembers=list[Member], attchingMembers = list[Member], sizeMin=0.1, sizeMax=1.0, constraint=0.25, recombined=True, clip=True, show=False):
+    def __init__ (self,
+                  mainMembers=list[Member],
+                  attchingMembers=list[Member],
+                  sizeMin=0.1,
+                  sizeMax=1.0,
+                  constraint=0.25,
+                  recombined=True,
+                  clip=True,
+                  show=False,
+                  structured=True):
         import gmsh
         gmsh.initialize()
 
@@ -1177,6 +1186,9 @@ class sPlatformMesh(platformMesh): # single platform mesh, all members are attac
         if recombined:
             gmsh.option.setNumber('Mesh.RecombinationAlgorithm', 1)
             gmsh.option.setNumber('Mesh.RecombineAll', 1)
+            
+            if structured:
+                gmsh.option.setNumber('Mesh.Algorithm', 11)
 
         gmsh.model.mesh.generate(2)
         
