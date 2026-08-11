@@ -27,3 +27,11 @@ reports
 
 # Emacs
 *~
+
+# Original scripts
+raft/*_orig.py
+
+# Local directories
+/scripts
+/temp_out
+/build
